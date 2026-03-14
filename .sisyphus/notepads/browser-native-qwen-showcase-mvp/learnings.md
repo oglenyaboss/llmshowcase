@@ -43,3 +43,24 @@
 2. Explain code - functionality and risks
 3. Rewrite text - clearer and professional
 4. Extract JSON - structured data extraction
+
+## [2026-03-14] Task 4: Pure Capability and Telemetry Helpers
+
+### Created Files
+- `src/lib/format.ts` - Formatting utilities for bytes, duration, tokens
+- `src/runtime/capability.ts` - Capability probe result formatting and support detection
+- `src/runtime/telemetry.ts` - Telemetry snapshot creation and updates
+- `src/test/runtime/capability.test.ts` - 15 test cases for capability helpers
+- `src/test/runtime/telemetry.test.ts` - 25 test cases for telemetry helpers
+
+### Key Design Decisions
+- `formatBytes()` returns 'N/A' for null, shows 0 decimals for whole numbers (4 GB, not 4.0 GB)
+- `isLikelyCapable()` uses heuristic: maxBufferSize * 4 = estimated VRAM, with 20% margin
+- Telemetry functions return new objects (immutable pattern) - never mutate input
+- All helpers are pure functions with no browser API dependencies
+
+### Test Coverage
+- No WebGPU case, adapter null case, probe success formatting
+- Support messages for unsupported browser and adapter unavailable
+- Default telemetry state, zero-token throughput, byte formatting for limits
+- Duration formatting, phase transitions, generation updates
