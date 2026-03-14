@@ -406,3 +406,32 @@ Added `@prompt-controls` test that verifies:
 - `npm run build` exits 0
 - `lsp_diagnostics` shows zero errors on all modified files
 - All 100 unit tests pass
+
+## [2026-03-14] Task: Graceful Failure and Recovery
+
+### Created Files
+- `src/lib/copy.ts` - Centralized error messages, titles, and recovery suggestions
+
+### Key Patterns
+- Error copy is centralized in a single file for consistency and easy updates
+- Each error type has: message, title, and recovery suggestion
+- `getErrorCopy()`, `getErrorTitle()`, `getRecoverySuggestion()` helpers for type-safe access
+
+### Recovery Behavior
+- Model selector cards are always clickable except during loading/warming phases
+- Users can switch models after errors without page refresh
+- `CLEAR_ERROR` action transitions from error phase to idle/ready based on warm state
+- Clear Error button provided in capability status card for explicit recovery
+
+### Error Types Defined
+1. `unsupportedBrowser` - WebGPU not available
+2. `adapterUnavailable` - WebGPU API exists but no GPU adapter
+3. `modelInitFailure` - Model initialization failed
+4. `warmupFailure` - Warmup failed after download
+5. `generationFailure` - Inference error during generation
+6. `cacheTrouble` - Guidance for stuck downloads
+
+### No Hidden Fallbacks
+- Errors are shown honestly in telemetry panel (`lastError`)
+- No silent error catching
+- Recovery suggestions guide users to switch models or clear browser data

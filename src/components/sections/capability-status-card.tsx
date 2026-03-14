@@ -3,13 +3,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { useShowcaseState } from '@/state/showcase-context'
 import {
   selectIsProbing,
   selectIsUnsupported,
   selectHasError,
   selectIsReady,
-  selectIsLoading
+  selectIsLoading,
+  selectCanClearError
 } from '@/state/showcase-selectors'
 import { cn } from '@/lib/utils'
 import {
@@ -20,16 +22,23 @@ import {
   Cpu,
   Box,
   Thermometer,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react'
+import {
+  getErrorCopy,
+  getErrorTitle,
+  getRecoverySuggestion
+} from '@/lib/copy'
 
 export function CapabilityStatusCard() {
-  const { state } = useShowcaseState()
+  const { state, dispatch } = useShowcaseState()
   const isProbing = selectIsProbing(state)
   const isUnsupported = selectIsUnsupported(state)
   const hasError = selectHasError(state)
   const isReady = selectIsReady(state)
   const isLoading = selectIsLoading(state)
+  const canClearError = selectCanClearError(state)
   const { telemetry, warmState, runtimePhase, currentError } = state
 
   const getWebGPUStatus = () => {
@@ -154,9 +163,12 @@ export function CapabilityStatusCard() {
         {showUnsupportedMessage && (
           <Alert variant="destructive" data-testid="unsupported-alert">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>WebGPU Unavailable</AlertTitle>
+            <AlertTitle>{getErrorTitle('unsupportedBrowser')}</AlertTitle>
             <AlertDescription>
-              WebGPU is unavailable in this browser. Try the latest Chrome, Edge, or Safari on a newer GPU-capable device.
+              {getErrorCopy('unsupportedBrowser')}
+              <div className="mt-2 text-xs">
+                {getRecoverySuggestion('unsupportedBrowser')}
+              </div>
             </AlertDescription>
           </Alert>
         )}
@@ -164,9 +176,12 @@ export function CapabilityStatusCard() {
         {showAdapterUnavailableMessage && (
           <Alert variant="warning" data-testid="adapter-unavailable-alert">
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>GPU Adapter Not Found</AlertTitle>
+            <AlertTitle>{getErrorTitle('adapterUnavailable')}</AlertTitle>
             <AlertDescription>
-              This browser exposed the WebGPU API, but no compatible GPU adapter could be created.
+              {getErrorCopy('adapterUnavailable')}
+              <div className="mt-2 text-xs">
+                {getRecoverySuggestion('adapterUnavailable')}
+              </div>
             </AlertDescription>
           </Alert>
         )}
@@ -178,8 +193,19 @@ export function CapabilityStatusCard() {
             <AlertDescription>
               {currentError}
               <div className="mt-2 text-xs">
-                Try refreshing the page or selecting a different model. If the problem persists, your device may not have sufficient resources.
+                Try switching to Qwen 0.8B or selecting a different model. {getErrorCopy('cacheTrouble')}
               </div>
+              {canClearError && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => dispatch({ type: 'CLEAR_ERROR' })}
+                >
+                  <RefreshCw className="mr-2 h-3 w-3" />
+                  Clear Error
+                </Button>
+              )}
             </AlertDescription>
           </Alert>
         )}
