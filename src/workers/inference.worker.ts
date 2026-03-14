@@ -5,9 +5,14 @@
 
 import {
   AutoProcessor,
+  AutoTokenizer,
   Qwen3_5ForConditionalGeneration,
+  TextStreamer,
+  InterruptableStoppingCriteria,
   type PreTrainedModel,
   type Processor,
+  type PreTrainedTokenizer,
+  type StoppingCriteria,
 } from '@huggingface/transformers'
 
 import type {
@@ -22,6 +27,12 @@ import type {
   RuntimeErrorEvent,
   LoadModelRequest,
   DisposeModelRequest,
+  GenerateRequest,
+  InterruptRequest,
+  GenerationStartedEvent,
+  StreamDeltaEvent,
+  GenerationCompleteEvent,
+  GenerationInterruptedEvent,
 } from '@/runtime/inference-types'
 
 import { models } from '@/config/models'
@@ -36,6 +47,18 @@ import { models } from '@/config/models'
  */
 const SYSTEM_PROMPT =
   'You are a concise local browser demo assistant. Answer directly, clearly, and compactly. Do not mention hidden reasoning. Prefer short technical responses.'
+
+/**
+ * Generation defaults for all models
+ */
+const GENERATION_DEFAULTS = {
+  do_sample: true,
+  temperature: 0.7,
+  top_p: 0.8,
+  top_k: 20,
+  repetition_penalty: 1.05,
+  max_new_tokens: 256,
+}
 
 /**
  * First dtype attempt - all q4 quantization
@@ -91,15 +114,21 @@ interface NavigatorWithGPU extends Navigator {
 interface ModelState {
   model: PreTrainedModel | null
   processor: Processor | null
+  tokenizer: PreTrainedTokenizer | null
   modelId: string | null
   repoId: string | null
+  stoppingCriteria: InterruptableStoppingCriteria | null
+  activeRequestId: string | null
 }
 
 const modelState: ModelState = {
   model: null,
   processor: null,
+  tokenizer: null,
   modelId: null,
   repoId: null,
+  stoppingCriteria: null,
+  activeRequestId: null,
 }
 
 // ============================================================================
@@ -181,6 +210,64 @@ function createRuntimeErrorEvent(
     modelId,
     error,
     phase: 'error',
+  }
+}
+
+/**
+ * Creates a generation started event
+ */
+function createGenerationStartedEvent(
+  requestId: string,
+  modelId: string
+): GenerationStartedEvent {
+  return {
+    type: 'generation_started',
+    requestId,
+    modelId,
+  }
+}
+
+/**
+ * Creates a stream delta event
+ */
+function createStreamDeltaEvent(
+  requestId: string,
+  modelId: string,
+  token: string
+): StreamDeltaEvent {
+  return {
+    type: 'stream_delta',
+    requestId,
+    modelId,
+    token,
+  }
+}
+
+/**
+ * Creates a generation complete event
+ */
+function createGenerationCompleteEvent(
+  requestId: string,
+  modelId: string
+): GenerationCompleteEvent {
+  return {
+    type: 'generation_complete',
+    requestId,
+    modelId,
+  }
+}
+
+/**
+ * Creates a generation interrupted event
+ */
+function createGenerationInterruptedEvent(
+  requestId: string,
+  modelId: string
+): GenerationInterruptedEvent {
+  return {
+    type: 'generation_interrupted',
+    requestId,
+    modelId,
   }
 }
 
@@ -326,10 +413,12 @@ async function loadModel(
 
   let model: PreTrainedModel | null = null
   let processor: Processor | null = null
+  let tokenizer: PreTrainedTokenizer | null = null
 
   // Try first dtype configuration
   try {
     processor = await AutoProcessor.from_pretrained(repoId)
+    tokenizer = await AutoTokenizer.from_pretrained(repoId)
     
     model = await Qwen3_5ForConditionalGeneration.from_pretrained(repoId, {
       dtype: dtypeAttempt1,
@@ -372,6 +461,7 @@ async function loadModel(
   // Store model state
   modelState.model = model
   modelState.processor = processor
+  modelState.tokenizer = tokenizer
   modelState.modelId = modelId
   modelState.repoId = repoId
 
@@ -446,8 +536,91 @@ async function disposeModel(): Promise<void> {
   // Reset state
   modelState.model = null
   modelState.processor = null
+  modelState.tokenizer = null
   modelState.modelId = null
   modelState.repoId = null
+  modelState.stoppingCriteria = null
+  modelState.activeRequestId = null
+}
+
+/**
+ * Generates text with streaming output
+ */
+async function generate(
+  requestId: string,
+  modelId: string,
+  prompt: string
+): Promise<void> {
+  if (!modelState.model || !modelState.processor || !modelState.tokenizer) {
+    self.postMessage(
+      createRuntimeErrorEvent(requestId, modelId, 'Model not loaded')
+    )
+    return
+  }
+
+  modelState.activeRequestId = requestId
+
+  const stoppingCriteria = new InterruptableStoppingCriteria()
+  modelState.stoppingCriteria = stoppingCriteria
+
+  self.postMessage(createGenerationStartedEvent(requestId, modelId))
+
+  const messages = [
+    { role: 'system' as const, content: SYSTEM_PROMPT },
+    { role: 'user' as const, content: prompt },
+  ]
+
+  const text = modelState.processor.apply_chat_template(messages, {
+    add_generation_prompt: true,
+  })
+
+  const inputs = await modelState.processor(text)
+
+  const streamer = new TextStreamer(modelState.tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: true,
+    callback_function: (token: string) => {
+      if (modelState.activeRequestId === requestId) {
+        self.postMessage(createStreamDeltaEvent(requestId, modelId, token))
+      }
+    },
+  })
+
+  try {
+    await modelState.model.generate({
+      ...inputs,
+      ...GENERATION_DEFAULTS,
+      streamer,
+      stopping_criteria: [stoppingCriteria] as StoppingCriteria[],
+    })
+
+    if (modelState.activeRequestId === requestId) {
+      if (stoppingCriteria.interrupted) {
+        self.postMessage(createGenerationInterruptedEvent(requestId, modelId))
+      } else {
+        self.postMessage(createGenerationCompleteEvent(requestId, modelId))
+      }
+    }
+  } catch (error) {
+    if (modelState.activeRequestId === requestId) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error during generation'
+      self.postMessage(createRuntimeErrorEvent(requestId, modelId, errorMsg))
+    }
+  } finally {
+    if (modelState.activeRequestId === requestId) {
+      modelState.stoppingCriteria = null
+      modelState.activeRequestId = null
+    }
+  }
+}
+
+/**
+ * Interrupts the current generation
+ */
+function interrupt(requestId: string, modelId: string): void {
+  if (modelState.stoppingCriteria) {
+    modelState.stoppingCriteria.interrupt()
+  }
 }
 
 // ============================================================================
@@ -482,17 +655,22 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         break
       }
 
-      case 'generate':
-      case 'interrupt':
+      case 'generate': {
+        const { requestId, modelId, prompt } = event.data as GenerateRequest
+        await generate(requestId, modelId, prompt)
+        break
+      }
+
+      case 'interrupt': {
+        const { requestId, modelId } = event.data as InterruptRequest
+        interrupt(requestId, modelId)
+        break
+      }
+
       case 'reset_session': {
-        // These will be implemented in later tasks
-        // For now, return a placeholder error
-        const response = createRuntimeErrorEvent(
-          (event.data as { requestId?: string }).requestId ?? '',
-          (event.data as { modelId?: string }).modelId ?? '',
-          `Request type '${type}' not yet implemented`
-        )
-        self.postMessage(response as WorkerEvent)
+        const { requestId, modelId } = event.data as { requestId: string; modelId: string }
+        await disposeModel()
+        self.postMessage(createModelReadyEvent(requestId, modelId))
         break
       }
 

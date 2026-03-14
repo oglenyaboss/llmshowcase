@@ -261,3 +261,83 @@ You are a concise local browser demo assistant. Answer directly, clearly, and co
 - Uses same system prompt as real generation
 - Input: "Hi" with system prompt
 - Cleans up model on warmup failure
+
+## [2026-03-14] Task 9: Streaming Generation and Interruption Semantics
+
+### Key Implementation Pattern for TextStreamer
+`TextStreamer` requires a `PreTrainedTokenizer`, NOT a `Processor`. Load tokenizer separately:
+
+```typescript
+import { AutoTokenizer, TextStreamer, InterruptableStoppingCriteria } from '@huggingface/transformers'
+
+// Load tokenizer alongside processor
+const processor = await AutoProcessor.from_pretrained(repoId)
+const tokenizer = await AutoTokenizer.from_pretrained(repoId)
+
+// TextStreamer requires tokenizer, not processor
+const streamer = new TextStreamer(tokenizer, {
+  skip_prompt: true,
+  skip_special_tokens: true,
+  callback_function: (token: string) => {
+    // Handle streaming token
+  },
+})
+```
+
+### TextStreamer Callback Options
+- Use `callback_function` (not `callbacks.on_token_generated`)
+- The callback receives decoded text chunks, not raw tokens
+
+### InterruptableStoppingCriteria Usage
+```typescript
+const stoppingCriteria = new InterruptableStoppingCriteria()
+
+// Pass to generate
+await model.generate({
+  ...inputs,
+  streamer,
+  stopping_criteria: [stoppingCriteria],
+})
+
+// To interrupt:
+stoppingCriteria.interrupt()
+
+// Check if interrupted:
+if (stoppingCriteria.interrupted) {
+  // Handle interruption
+}
+```
+
+### Generation Flow
+1. Emit `generation_started` event
+2. Create `InterruptableStoppingCriteria` and store in model state
+3. Build messages: system prompt + user prompt
+4. Apply chat template via processor
+5. Create `TextStreamer` with tokenizer and callback
+6. Generate with streamer and stopping criteria
+7. On completion: emit `generation_complete` or `generation_interrupted`
+
+### ModelState Extensions for Generation
+```typescript
+interface ModelState {
+  model: PreTrainedModel | null
+  processor: Processor | null
+  tokenizer: PreTrainedTokenizer | null  // Required for TextStreamer
+  modelId: string | null
+  repoId: string | null
+  stoppingCriteria: InterruptableStoppingCriteria | null
+  activeRequestId: string | null  // Track current generation for stale event filtering
+}
+```
+
+### Request ID Tracking
+- Store `activeRequestId` when generation starts
+- Only emit events if `activeRequestId` matches current request
+- Clear `activeRequestId` when generation completes/errors
+- This prevents stale events from old requests
+
+### Events Emitted
+1. `generation_started` - When generation begins
+2. `stream_delta` - For each token/chunk streamed
+3. `generation_complete` - Normal completion
+4. `generation_interrupted` - When `stoppingCriteria.interrupt()` was called
