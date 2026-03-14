@@ -108,3 +108,38 @@ test('@prompt-controls - inference panel and preset prompts work correctly', asy
   await presetExtractJson.click()
   await expect(promptInput).toContainText('Extract structured data')
 })
+
+test('@telemetry-shell - displays all required telemetry fields', async ({ page }) => {
+  await page.goto('/')
+
+  const telemetryPanel = page.getByTestId('telemetry-panel')
+  await expect(telemetryPanel).toBeVisible()
+
+  const telemetryRuntime = page.getByTestId('telemetry-runtime')
+  await expect(telemetryRuntime).toBeVisible()
+
+  await expect(telemetryPanel).toContainText('Model')
+  await expect(telemetryPanel).toContainText('Label')
+  await expect(telemetryPanel).toContainText('Repository')
+  await expect(telemetryPanel).toContainText('Support Tier')
+
+  await expect(telemetryPanel).toContainText('Runtime')
+  await expect(telemetryPanel).toContainText('Library')
+  await expect(telemetryPanel).toContainText('Backend')
+  await expect(telemetryPanel).toContainText('Phase')
+  await expect(telemetryPanel).toContainText('Warm State')
+
+  await expect(telemetryPanel).toContainText('Capabilities')
+  await expect(telemetryPanel).toContainText('shader-f16')
+  await expect(telemetryPanel).toContainText('Max Buffer')
+  await expect(telemetryPanel).toContainText('Max Storage Buffer')
+
+  await expect(telemetryPanel).toContainText('Performance')
+  await expect(telemetryPanel).toContainText('Load Duration')
+  await expect(telemetryPanel).toContainText('Warmup Duration')
+  await expect(telemetryPanel).toContainText('Generation Duration')
+  await expect(telemetryPanel).toContainText('Token Count')
+  await expect(telemetryPanel).toContainText('Tokens/sec')
+
+  await expect(telemetryPanel).toContainText('Memory')
+})
