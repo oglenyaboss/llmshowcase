@@ -197,3 +197,67 @@ vi.mock('@/runtime/worker-client', () => {
 - `loadModel()`: Resolves with `ModelLoadResult` on success, rejects on runtime error
 - `generate()`: Resolves with `GenerationResult` on success/interrupt, rejects on error
 - Runtime errors cause promise rejection (not resolution with failure object)
+
+## [2026-03-14] Task 8: Qwen Model Initialization in Worker
+
+### Dependency
+- `@huggingface/transformers@4.0.0-next.6` - Pinned version for Qwen3.5 compatibility
+
+### Key Implementation Pattern for Qwen3.5
+The correct flow for text-only generation with Qwen3_5ForConditionalGeneration:
+
+```typescript
+import {
+  AutoProcessor,
+  Qwen3_5ForConditionalGeneration,
+  type PreTrainedModel,
+  type Processor,
+} from '@huggingface/transformers'
+
+// 1. Load processor and model
+const processor = await AutoProcessor.from_pretrained(repoId)
+const model = await Qwen3_5ForConditionalGeneration.from_pretrained(repoId, {
+  dtype: { embed_tokens: 'q4', vision_encoder: 'q4', decoder_model_merged: 'q4' },
+  device: 'webgpu',
+  progress_callback: (progress) => { /* emit progress events */ },
+})
+
+// 2. Apply chat template (returns string)
+const text = processor.apply_chat_template(messages, {
+  add_generation_prompt: true,
+})
+
+// 3. Process text to get inputs tensor
+const inputs = await processor(text)
+
+// 4. Generate
+await model.generate({ ...inputs, max_new_tokens: 256 })
+```
+
+### Dtype Fallback Strategy
+1. First attempt: All q4 quantization (embed_tokens, vision_encoder, decoder_model_merged)
+2. Second attempt: fp16 vision_encoder if first fails
+3. No third fallback - surface error to user
+
+### Hidden System Prompt
+```
+You are a concise local browser demo assistant. Answer directly, clearly, and compactly. Do not mention hidden reasoning. Prefer short technical responses.
+```
+
+### Model State Management
+- Single model in memory at a time
+- `disposeModel()` clears model reference and resets state
+- Model stored in `ModelState` interface with model, processor, modelId, repoId
+
+### Worker Events Emitted During Load
+1. `load_started` - When load begins
+2. `load_progress` - During download with progress percentage and file name
+3. `warming_started` - After model loaded, before warmup
+4. `model_ready` - After successful warmup
+5. `runtime_error` - On any failure (with cleanup of partial state)
+
+### Warmup Implementation
+- One-token generation with minimal input
+- Uses same system prompt as real generation
+- Input: "Hi" with system prompt
+- Cleans up model on warmup failure
