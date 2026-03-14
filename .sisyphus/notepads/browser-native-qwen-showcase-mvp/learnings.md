@@ -64,3 +64,44 @@
 - Support messages for unsupported browser and adapter unavailable
 - Default telemetry state, zero-token throughput, byte formatting for limits
 - Duration formatting, phase transitions, generation updates
+
+## [2026-03-14] Task 5: Reducer-Driven App State
+
+### Created Files
+- `src/state/showcase-reducer.ts` - Central reducer with 17 action types
+- `src/state/showcase-selectors.ts` - 20 selector functions (11 base + 9 derived)
+- `src/state/showcase-context.tsx` - React context provider with hooks
+- `src/test/state/showcase-reducer.test.ts` - 41 test cases
+
+### State Machine Rules Enforced
+1. Generation can only start from `ready` phase with non-empty prompt
+2. Model switch resets warm state to `cold` and clears output/timings
+3. Stop request moves phase to `stopping` before interrupt result
+4. Interrupted generation ends in `ready` (not `error`)
+5. Clear error only works from `error` phase (transitions to `idle` or `ready` based on warm state)
+6. Generate from `unsupported` state is blocked
+
+### Action Types
+Discriminated union with 17 actions covering:
+- Probe lifecycle (start/success/failure)
+- Model selection and switch
+- Load lifecycle (start/progress/ready/warmup)
+- Prompt/preset management
+- Generation lifecycle (start/stream/complete/interrupt)
+- Error handling and telemetry updates
+
+### Selector Patterns
+- Base selectors: Direct property access
+- Derived selectors: Computed values (canGenerate, isLoading, isGenerating, etc.)
+- All selectors are pure functions with no side effects
+
+### Context API
+- `ShowcaseProvider` - Wraps component tree
+- `useShowcaseState()` - Returns { state, dispatch }
+- `useShowcaseDispatch()` - Returns dispatch function only
+- `useShowcaseSelector(fn)` - For optimized re-renders
+
+### Test Coverage
+- All state transitions covered
+- Edge cases: empty prompt, invalid model, wrong phase transitions
+- Selector tests for derived state calculations
