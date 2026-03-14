@@ -1,6 +1,7 @@
 'use client'
 
 import { ShowcaseProvider } from '@/state/showcase-context'
+import { RuntimeInitializer } from '@/components/runtime-initializer'
 import { HeroSection } from '@/components/sections/hero-section'
 import { ModelSelectorCard } from '@/components/sections/model-selector-card'
 import { CapabilityStatusCard } from '@/components/sections/capability-status-card'
@@ -13,6 +14,7 @@ import { FooterInfo } from '@/components/sections/footer-info'
 export function AppShell() {
   return (
     <ShowcaseProvider>
+      <RuntimeInitializer />
       <div className="min-h-screen bg-background">
         <div className="container mx-auto max-w-6xl px-4 py-6">
           <HeroSection />
