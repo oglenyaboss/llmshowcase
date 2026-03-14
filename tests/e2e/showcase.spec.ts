@@ -45,3 +45,24 @@ test('@model-selection - allows switching between models', async ({ page }) => {
   await expect(modelCard08b).toHaveClass(/ring-1/)
   await expect(experimentalWarning).not.toBeVisible()
 })
+
+test('@unsupported - capability status card renders with correct structure', async ({ page }) => {
+  await page.goto('/')
+
+  // Verify status card elements exist with correct structure
+  const webgpuStatus = page.getByTestId('status-webgpu')
+  await expect(webgpuStatus).toBeVisible()
+  await expect(webgpuStatus).toContainText('WebGPU')
+
+  const runtimeStatus = page.getByTestId('status-runtime')
+  await expect(runtimeStatus).toBeVisible()
+  await expect(runtimeStatus).toContainText('Runtime')
+
+  const modelStatus = page.getByTestId('status-model')
+  await expect(modelStatus).toBeVisible()
+  await expect(modelStatus).toContainText('Model')
+
+  const warmStatus = page.getByTestId('status-warm')
+  await expect(warmStatus).toBeVisible()
+  await expect(warmStatus).toContainText('Cache')
+})
