@@ -134,3 +134,66 @@ Discriminated union with 17 actions covering:
 6. requestAdapterInfo returning empty info
 7. Probe throwing unexpectedly
 8. Non-Error thrown values
+
+## [2026-03-14] Task 7: Worker Client and Model Manager
+
+### Created Files
+- `src/runtime/worker-client.ts` - WorkerClient class for worker lifecycle management
+- `src/runtime/model-manager.ts` - ModelManager facade for worker messaging
+- `src/test/runtime/model-manager.test.ts` - 11 test cases for model-manager
+
+### Key Design Decisions
+1. **WorkerClient handles lifecycle**: Initialize, terminate, message wiring
+2. **ModelManager tracks request IDs**: New requests invalidate old ones, stale events are ignored
+3. **Runtime errors reject promises**: Error events cause pending promises to reject (not resolve with failure object)
+4. **switchModel terminates and recreates worker**: Full cleanup ensures clean state
+5. **Callbacks pattern for events**: ModelManager exposes callbacks for reducer integration rather than dispatching directly
+
+### Worker Loading Pattern
+For Next.js, use URL constructor with import.meta.url:
+```typescript
+const workerUrl = new URL('../workers/inference.worker.ts', import.meta.url)
+const worker = new Worker(workerUrl, { type: 'module' })
+```
+
+### Request ID Generation
+```typescript
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+}
+```
+
+### Test Mocking Strategy
+For Vitest with ES modules, use a class-based mock in vi.mock():
+```typescript
+vi.mock('@/runtime/worker-client', () => {
+  return {
+    WorkerClient: class MockWorkerClient {
+      constructor(options) { capturedOnEvent = options.onEvent }
+      initialize() { mockCalls.push({ method: 'initialize', args: [] }) }
+      sendRequest(...args) { mockCalls.push({ method: 'sendRequest', args }) }
+      terminate() { mockCalls.push({ method: 'terminate', args: [] }) }
+      isReady() { return true }
+    },
+  }
+})
+```
+
+### Test Cases Covered
+1. Probe sends request and resolves with result
+2. Load model rejects when probe not called first
+3. Load model sends correct request after probe
+4. Generate rejects when probe not called first
+5. Generate rejects when model not loaded
+6. Stale request IDs are ignored
+7. switchModel terminates and reinitializes worker
+8. Dispose terminates worker and clears state
+9. Runtime errors propagate to callbacks
+10. Multiple concurrent requests - only latest matters
+11. Interrupt sends correct request
+
+### Promise Behavior
+- `probe()`: Resolves with `CapabilityProbeResult`
+- `loadModel()`: Resolves with `ModelLoadResult` on success, rejects on runtime error
+- `generate()`: Resolves with `GenerationResult` on success/interrupt, rejects on error
+- Runtime errors cause promise rejection (not resolution with failure object)
