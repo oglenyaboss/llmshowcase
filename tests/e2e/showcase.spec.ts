@@ -66,3 +66,45 @@ test('@unsupported - capability status card renders with correct structure', asy
   await expect(warmStatus).toBeVisible()
   await expect(warmStatus).toContainText('Cache')
 })
+
+test('@prompt-controls - inference panel and preset prompts work correctly', async ({ page }) => {
+  await page.goto('/')
+
+  const promptInput = page.getByTestId('prompt-input')
+  const generateButton = page.getByTestId('generate-button')
+  const stopButton = page.getByTestId('stop-button')
+
+  await expect(promptInput).toBeVisible()
+  await expect(generateButton).toBeVisible()
+  await expect(generateButton).toBeDisabled()
+
+  await promptInput.fill('Test prompt')
+  await expect(generateButton).toBeEnabled()
+
+  const presetSummarize = page.getByTestId('preset-summarize')
+  const presetExplainCode = page.getByTestId('preset-explain-code')
+  const presetRewriteText = page.getByTestId('preset-rewrite-text')
+  const presetExtractJson = page.getByTestId('preset-extract-json')
+
+  await expect(presetSummarize).toBeVisible()
+  await expect(presetExplainCode).toBeVisible()
+  await expect(presetRewriteText).toBeVisible()
+  await expect(presetExtractJson).toBeVisible()
+
+  await presetSummarize.click()
+  await expect(promptInput).toContainText('Summarize the following in 3 concise bullet points:')
+
+  await promptInput.fill('')
+  await presetExplainCode.click()
+  await expect(promptInput).toContainText('Explain this code clearly')
+
+  await promptInput.fill('Some existing text')
+  await presetRewriteText.click()
+  const rewriteText = await promptInput.inputValue()
+  expect(rewriteText).toContain('Some existing text')
+  expect(rewriteText).toContain('Rewrite the following text')
+
+  await promptInput.fill('')
+  await presetExtractJson.click()
+  await expect(promptInput).toContainText('Extract structured data')
+})

@@ -341,3 +341,68 @@ interface ModelState {
 2. `stream_delta` - For each token/chunk streamed
 3. `generation_complete` - Normal completion
 4. `generation_interrupted` - When `stoppingCriteria.interrupt()` was called
+
+## [2026-03-14] Task 10: Inference Form, Preset Interactions, and Output Panel
+
+### Component Structure
+
+#### Inference Panel (`src/components/sections/inference-panel.tsx`)
+- Already fully implemented with all required functionality
+- Uses `selectCanGenerate` and `selectCanStop` selectors for button states
+- Generate button disabled when: prompt empty, unsupported, stopping, loading
+- Stop button enabled only during generating/stopping phases
+- Uses `data-testid` attributes: `prompt-input`, `generate-button`, `stop-button`
+
+#### Preset Prompts (`src/components/sections/preset-prompts.tsx`)
+- Updated to use `applyPresetTemplate` function from presets config
+- Four preset buttons with icons: Summarize, Explain code, Rewrite text, Extract JSON
+- Preset click wraps existing text into {{input}} placeholder or removes placeholder if empty
+- Uses `data-testid` attributes: `preset-summarize`, `preset-explain-code`, `preset-rewrite-text`, `preset-extract-json`
+
+#### Output Panel (`src/components/sections/output-panel.tsx`)
+- Updated to show skeleton loading state during `loading_model` and `warming_model` phases
+- Uses `selectIsLoading` selector to detect loading states
+- Console/result pane styling with dark background (`bg-black/50`)
+- Scrollable streaming text output with cursor animation during generation
+- Uses `data-testid` attribute: `output-stream`
+
+### State Management Patterns
+
+#### Selectors Used
+- `selectCanGenerate`: Returns true when runtimePhase is 'ready' and prompt text is non-empty
+- `selectCanStop`: Returns true when runtimePhase is 'generating' or 'stopping'
+- `selectIsLoading`: Returns true when runtimePhase is 'loading_model' or 'warming_model'
+- `selectIsGenerating`: Returns true when runtimePhase is 'generating'
+- `selectStreamedOutput`: Returns the streamed output text
+
+#### Actions Dispatched
+- `SET_PROMPT`: Updates prompt text
+- `GENERATION_START`: Starts generation (only if canGenerate)
+- `STOP_REQUEST`: Requests generation stop
+- `APPLY_PRESET`: Applies preset template with presetId and text
+
+### Preset Template Logic
+
+The `applyPresetTemplate` function in `src/config/presets.ts`:
+- If input is provided: replaces {{input}} placeholder with the input text
+- If input is empty: returns template without the placeholder (removes `\n\n{{input}}` or `{{input}}`)
+
+### E2E Test Pattern
+
+Added `@prompt-controls` test that verifies:
+1. Prompt input and generate button visibility
+2. Generate button disabled when prompt is empty
+3. Generate button enabled when prompt has text
+4. All four preset buttons are visible
+5. Preset buttons insert templates correctly
+6. Preset buttons wrap existing text into the template
+
+### Changes Made
+1. `src/components/sections/preset-prompts.tsx`: Import and use `applyPresetTemplate` function
+2. `src/components/sections/output-panel.tsx`: Add skeleton loading state during loading/warming phases
+3. `tests/e2e/showcase.spec.ts`: Add `@prompt-controls` e2e test
+
+### Verification
+- `npm run build` exits 0
+- `lsp_diagnostics` shows zero errors on all modified files
+- All 100 unit tests pass

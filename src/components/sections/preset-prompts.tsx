@@ -1,7 +1,7 @@
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { presetList } from '@/config/presets'
+import { presetList, applyPresetTemplate } from '@/config/presets'
 import { useShowcaseState } from '@/state/showcase-context'
 import { cn } from '@/lib/utils'
 import { FileText, Code, RefreshCw, Braces, Check } from 'lucide-react'
@@ -23,13 +23,15 @@ const presetTestIds: Record<string, string> = {
 export function PresetPrompts() {
   const { state, dispatch } = useShowcaseState()
   const selectedPresetId = state.selectedPresetId
+  const promptText = state.promptText
 
   const handleApplyPreset = (presetId: string) => {
     const preset = presetList.find(p => p.id === presetId)
     if (preset) {
+      const newText = applyPresetTemplate(preset.template, promptText)
       dispatch({ 
         type: 'APPLY_PRESET', 
-        payload: { presetId, text: preset.template.replace('\n\n{{input}}', '').replace('{{input}}', '') }
+        payload: { presetId, text: newText }
       })
     }
   }
