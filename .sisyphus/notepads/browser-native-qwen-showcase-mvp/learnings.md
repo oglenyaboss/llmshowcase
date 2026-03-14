@@ -105,3 +105,32 @@ Discriminated union with 17 actions covering:
 - All state transitions covered
 - Edge cases: empty prompt, invalid model, wrong phase transitions
 - Selector tests for derived state calculations
+
+## [2026-03-14] Task 6: Web Worker Shell and WebGPU Probe
+
+### Created Files
+- `src/workers/inference.worker.ts` - Dedicated module Web Worker with probe logic
+- `src/test/runtime/worker-probe.test.ts` - 8 test cases for probe contract coverage
+
+### Key Design Decisions
+1. **Probe logic extracted for testability**: `performProbe()` is a separate exported function that can be tested directly without worker message passing
+2. **WebGPU types defined inline**: Since WebGPU types are not in standard TypeScript lib, they are defined in the worker file
+3. **Graceful error handling**: All errors are caught and returned as structured `CapabilityProbeResult` with `errorMessage` field rather than thrown
+4. **Request types placeholder**: Future request types (load_model, generate, etc.) are handled but return "not yet implemented" errors
+
+### Probe Implementation
+- Checks `navigator.gpu` existence
+- Calls `navigator.gpu.requestAdapter()`
+- If adapter exists: checks `shader-f16` support, captures `maxBufferSize` and `maxStorageBufferBindingSize`
+- Gets adapter info via `requestAdapterInfo()` with fallback for unsupported browsers
+- All browser API calls wrapped in try/catch
+
+### Test Coverage
+1. Unsupported browser case (navigator.gpu = undefined)
+2. Adapter null case (requestAdapter returns null)
+3. Successful probe with full capability info
+4. Missing shader-f16 feature
+5. requestAdapterInfo throwing error
+6. requestAdapterInfo returning empty info
+7. Probe throwing unexpectedly
+8. Non-Error thrown values
