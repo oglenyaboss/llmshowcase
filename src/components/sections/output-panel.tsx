@@ -17,9 +17,8 @@ export function OutputPanel() {
   const isGenerating = selectIsGenerating(state)
   const isLoading = selectIsLoading(state)
   const streamedOutput = selectStreamedOutput(state)
-  const outputText = state.outputText
 
-  const displayContent = streamedOutput || outputText
+  const displayContent = streamedOutput
 
   if (isLoading) {
     return (

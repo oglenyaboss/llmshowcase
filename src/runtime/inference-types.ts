@@ -47,6 +47,14 @@ export interface GenerationDefaults {
 }
 
 /**
+ * Chat message format for inference requests
+ */
+export interface InferenceChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+/**
  * Model Configuration
  * Complete metadata for a loadable Qwen model
  */
@@ -118,7 +126,8 @@ export interface GenerateRequest {
   type: 'generate'
   requestId: string
   modelId: string
-  prompt: string
+  messages: InferenceChatMessage[]
+  settings: GenerationDefaults
 }
 
 export interface InterruptRequest {

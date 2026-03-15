@@ -1,20 +1,20 @@
 'use client'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { presetList, applyPresetTemplate } from '@/config/presets'
 import { useShowcaseState } from '@/state/showcase-context'
+import { selectActiveChatDraft, selectIsBusy } from '@/state/showcase-selectors'
 import { cn } from '@/lib/utils'
-import { FileText, Code, RefreshCw, Braces, Check } from 'lucide-react'
+import { FileText, Code, RefreshCw, Braces } from 'lucide-react'
 
 const presetIcons: Record<string, React.ReactNode> = {
-  'summarize': <FileText className="h-4 w-4" />,
-  'explain-code': <Code className="h-4 w-4" />,
-  'rewrite-text': <RefreshCw className="h-4 w-4" />,
-  'extract-json': <Braces className="h-4 w-4" />,
+  summarize: <FileText className="h-3 w-3" />,
+  'explain-code': <Code className="h-3 w-3" />,
+  'rewrite-text': <RefreshCw className="h-3 w-3" />,
+  'extract-json': <Braces className="h-3 w-3" />,
 }
 
 const presetTestIds: Record<string, string> = {
-  'summarize': 'preset-summarize',
+  summarize: 'preset-summarize',
   'explain-code': 'preset-explain-code',
   'rewrite-text': 'preset-rewrite-text',
   'extract-json': 'preset-extract-json',
@@ -22,51 +22,43 @@ const presetTestIds: Record<string, string> = {
 
 export function PresetPrompts() {
   const { state, dispatch } = useShowcaseState()
-  const selectedPresetId = state.selectedPresetId
-  const promptText = state.promptText
+  const promptText = selectActiveChatDraft(state)
+  const isBusy = selectIsBusy(state)
 
   const handleApplyPreset = (presetId: string) => {
-    const preset = presetList.find(p => p.id === presetId)
+    const preset = presetList.find((p) => p.id === presetId)
     if (preset) {
       const newText = applyPresetTemplate(preset.template, promptText)
-      dispatch({ 
-        type: 'APPLY_PRESET', 
-        payload: { presetId, text: newText }
+      dispatch({
+        type: 'APPLY_PROMPT_STARTER',
+        payload: newText,
       })
     }
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-medium">Preset Prompts</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-2">
-          {presetList.map((preset) => {
-            const isSelected = preset.id === selectedPresetId
-            const testId = presetTestIds[preset.id]
-            
-            return (
-              <button
-                type="button"
-                key={preset.id}
-                data-testid={testId}
-                onClick={() => handleApplyPreset(preset.id)}
-                className={cn(
-                  'inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-all',
-                  'hover:border-primary/50 hover:bg-primary/5',
-                  isSelected && 'border-primary bg-primary/10 text-primary'
-                )}
-              >
-                {presetIcons[preset.id]}
-                <span>{preset.label}</span>
-                {isSelected && <Check className="h-3 w-3" />}
-              </button>
-            )
-          })}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex flex-wrap gap-1.5">
+      {presetList.map((preset) => {
+        const testId = presetTestIds[preset.id]
+
+        return (
+          <button
+            type="button"
+            key={preset.id}
+            data-testid={testId}
+            onClick={() => handleApplyPreset(preset.id)}
+            disabled={isBusy}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
+              'transition-colors hover:border-primary/50 hover:bg-primary/5',
+              'disabled:cursor-not-allowed disabled:opacity-50'
+            )}
+          >
+            {presetIcons[preset.id]}
+            <span>{preset.label}</span>
+          </button>
+        )
+      })}
+    </div>
   )
 }

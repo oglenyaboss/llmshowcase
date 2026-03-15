@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const playwrightPort = 3100
+const playwrightBaseUrl = `http://127.0.0.1:${playwrightPort}`
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -8,7 +11,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: playwrightBaseUrl,
     trace: 'on-first-retry',
   },
   projects: [
@@ -18,8 +21,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    command: `NEXT_PUBLIC_E2E_MOCK_RUNTIME=1 npx next dev --port ${playwrightPort} --webpack`,
+    url: playwrightBaseUrl,
+    reuseExistingServer: false,
   },
 })

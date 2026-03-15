@@ -8,8 +8,23 @@ import type {
   WorkerEvent,
   ModelLoadResult,
   GenerationResult,
+  InferenceChatMessage,
+  GenerationDefaults,
 } from './inference-types'
 import { WorkerClient } from './worker-client'
+
+export class ModelManagerCancellationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ModelManagerCancellationError'
+  }
+}
+
+export function isModelManagerCancellationError(
+  error: unknown
+): error is ModelManagerCancellationError {
+  return error instanceof Error && error.name === 'ModelManagerCancellationError'
+}
 
 /**
  * Generates a unique request ID
@@ -26,8 +41,8 @@ export interface ModelManagerCallbacks {
   onModelReady: (modelId: string, loadDurationMs: number, warmupDurationMs: number) => void
   onGenerationStarted: (modelId: string) => void
   onStreamDelta: (modelId: string, token: string) => void
-  onGenerationComplete: (modelId: string) => void
-  onGenerationInterrupted: (modelId: string) => void
+  onGenerationComplete: (modelId: string, tokenCount: number, durationMs: number) => void
+  onGenerationInterrupted: (modelId: string, tokenCount: number, durationMs: number) => void
   onRuntimeError: (modelId: string, error: string, phase: string) => void
 }
 
@@ -46,9 +61,13 @@ export class ModelManager {
   private currentRequestId: string | null = null
   private activeModelId: string | null = null
   private pendingRequests: Map<string, PendingRequest> = new Map()
+  private activeRequestIds: Set<string> = new Set()
   private probed: boolean = false
   private loadStartTime: number | null = null
   private warmupStartTime: number | null = null
+  private generationStartedAt: number | null = null
+  private streamedOutput: string = ''
+  private disposed: boolean = false
 
   constructor(callbacks: ModelManagerCallbacks) {
     this.callbacks = callbacks
@@ -62,6 +81,10 @@ export class ModelManager {
    * Handle events from the worker
    */
   private handleWorkerEvent(event: WorkerEvent): void {
+    if (this.disposed) {
+      return
+    }
+
     // For probe_result, there's no requestId to validate
     if (event.type === 'probe_result') {
       this.probed = true
@@ -73,8 +96,7 @@ export class ModelManager {
     // All other events have requestId and modelId
     const { requestId, modelId } = event
 
-    // Ignore stale events - only process events for the current request
-    if (this.currentRequestId && requestId !== this.currentRequestId) {
+    if (!this.activeRequestIds.has(requestId)) {
       return
     }
 
@@ -110,39 +132,50 @@ export class ModelManager {
       }
 
       case 'generation_started':
+        this.generationStartedAt = Date.now()
+        this.streamedOutput = ''
         this.callbacks.onGenerationStarted(modelId)
         break
 
       case 'stream_delta':
+        this.streamedOutput += event.token
         this.callbacks.onStreamDelta(modelId, event.token)
         break
 
-      case 'generation_complete':
-        this.callbacks.onGenerationComplete(modelId)
-        // Resolve with placeholder - actual result tracking would need output accumulation
+      case 'generation_complete': {
+        const durationMs = this.getGenerationDuration()
+        const tokenCount = this.estimateTokenCount(this.streamedOutput)
+        this.callbacks.onGenerationComplete(modelId, tokenCount, durationMs)
         this.resolvePendingRequest('generate', modelId, {
           success: true,
           modelId,
-          output: '',
-          tokenCount: 0,
-          durationMs: 0,
+          output: this.streamedOutput,
+          tokenCount,
+          durationMs,
           interrupted: false,
         } as GenerationResult)
+        this.resetGenerationTracking()
         break
+      }
 
-      case 'generation_interrupted':
-        this.callbacks.onGenerationInterrupted(modelId)
+      case 'generation_interrupted': {
+        const durationMs = this.getGenerationDuration()
+        const tokenCount = this.estimateTokenCount(this.streamedOutput)
+        this.callbacks.onGenerationInterrupted(modelId, tokenCount, durationMs)
         this.resolvePendingRequest('generate', modelId, {
           success: true,
           modelId,
-          output: '',
-          tokenCount: 0,
-          durationMs: 0,
+          output: this.streamedOutput,
+          tokenCount,
+          durationMs,
           interrupted: true,
         } as GenerationResult)
+        this.resetGenerationTracking()
         break
+      }
 
       case 'runtime_error':
+        this.resetGenerationTracking()
         this.callbacks.onRuntimeError(modelId, event.error, event.phase)
         this.rejectPendingRequest(modelId, event.error)
         break
@@ -153,9 +186,15 @@ export class ModelManager {
    * Handle worker errors
    */
   private handleWorkerError(error: Error): void {
-    if (this.activeModelId) {
-      this.callbacks.onRuntimeError(this.activeModelId, error.message, 'error')
+    if (this.disposed) {
+      return
     }
+
+    const pendingRequest = this.getCurrentPendingRequest()
+    const modelId = pendingRequest?.modelId ?? this.activeModelId ?? ''
+    const phase = this.phaseForPendingRequest(pendingRequest?.type)
+
+    this.callbacks.onRuntimeError(modelId, error.message, phase)
     this.rejectAllPendingRequests(error.message)
   }
 
@@ -168,6 +207,10 @@ export class ModelManager {
     if (pending) {
       pending.resolve(result)
       this.pendingRequests.delete(key)
+      this.activeRequestIds.delete(pending.requestId)
+      if (this.currentRequestId === pending.requestId) {
+        this.currentRequestId = null
+      }
     }
   }
 
@@ -180,6 +223,10 @@ export class ModelManager {
       if (pending.modelId === modelId) {
         pending.reject(new Error(error))
         this.pendingRequests.delete(key)
+        this.activeRequestIds.delete(pending.requestId)
+        if (this.currentRequestId === pending.requestId) {
+          this.currentRequestId = null
+        }
       }
     }
   }
@@ -189,16 +236,110 @@ export class ModelManager {
    */
   private rejectAllPendingRequests(error: string): void {
     const pendingRequests = Array.from(this.pendingRequests.values())
+    const rejection = this.disposed
+      ? new ModelManagerCancellationError(error)
+      : new Error(error)
+
     for (const pending of pendingRequests) {
-      pending.reject(new Error(error))
+      pending.reject(rejection)
     }
+
     this.pendingRequests.clear()
+    this.activeRequestIds.clear()
+    this.currentRequestId = null
+    this.resetGenerationTracking()
+  }
+
+  private resolveSupersededRequests(type: 'load_model' | 'generate'): void {
+    const pendingRequests = Array.from(this.pendingRequests.values())
+
+    for (const pending of pendingRequests) {
+      if (pending.type !== type) {
+        continue
+      }
+
+      if (pending.type === 'load_model') {
+        pending.resolve({
+          success: false,
+          modelId: pending.modelId,
+          error: 'Superseded by a newer model request',
+        } satisfies ModelLoadResult)
+      }
+
+      if (pending.type === 'generate') {
+        pending.resolve({
+          success: false,
+          modelId: pending.modelId,
+          output: '',
+          tokenCount: 0,
+          durationMs: 0,
+          interrupted: true,
+          error: 'Superseded by a newer generation request',
+        } satisfies GenerationResult)
+      }
+
+      this.pendingRequests.delete(`${pending.type}:${pending.modelId}`)
+      this.activeRequestIds.delete(pending.requestId)
+
+      if (this.currentRequestId === pending.requestId) {
+        this.currentRequestId = null
+      }
+    }
+  }
+
+  private getCurrentPendingRequest(): PendingRequest | null {
+    if (!this.currentRequestId) {
+      return null
+    }
+
+    for (const pending of Array.from(this.pendingRequests.values())) {
+      if (pending.requestId === this.currentRequestId) {
+        return pending
+      }
+    }
+
+    return null
+  }
+
+  private phaseForPendingRequest(type?: PendingRequest['type']): string {
+    switch (type) {
+      case 'probe':
+        return 'probing'
+      case 'load_model':
+        return 'loading_model'
+      case 'generate':
+        return 'generating'
+      default:
+        return 'error'
+    }
+  }
+
+  private getGenerationDuration(): number {
+    return this.generationStartedAt ? Date.now() - this.generationStartedAt : 0
+  }
+
+  private resetGenerationTracking(): void {
+    this.generationStartedAt = null
+    this.streamedOutput = ''
+  }
+
+  private estimateTokenCount(output: string): number {
+    const normalized = output.trim()
+    if (!normalized) {
+      return 0
+    }
+
+    return normalized.split(/\s+/).length
   }
 
   /**
    * Probe WebGPU capabilities
    */
   async probe(): Promise<CapabilityProbeResult> {
+    if (this.disposed) {
+      throw new ModelManagerCancellationError('Manager disposed')
+    }
+
     if (!this.client.isReady()) {
       this.client.initialize()
     }
@@ -206,6 +347,7 @@ export class ModelManager {
     return new Promise((resolve, reject) => {
       const requestId = generateRequestId()
       this.currentRequestId = requestId
+      this.activeRequestIds.add(requestId)
 
       this.pendingRequests.set('probe:', {
         requestId,
@@ -223,6 +365,10 @@ export class ModelManager {
    * Load a model (placeholder - will be implemented in Task 8)
    */
   async loadModel(modelId: string): Promise<ModelLoadResult> {
+    if (this.disposed) {
+      throw new ModelManagerCancellationError('Manager disposed')
+    }
+
     if (!this.probed) {
       return {
         success: false,
@@ -235,9 +381,12 @@ export class ModelManager {
       this.client.initialize()
     }
 
+    this.resolveSupersededRequests('load_model')
+
     return new Promise((resolve, reject) => {
       const requestId = generateRequestId()
       this.currentRequestId = requestId
+      this.activeRequestIds.add(requestId)
 
       this.pendingRequests.set(`load_model:${modelId}`, {
         requestId,
@@ -255,10 +404,18 @@ export class ModelManager {
     })
   }
 
-  /**
-   * Generate text (placeholder - will be implemented in Task 9)
-   */
-  async generate(modelId: string, prompt: string): Promise<GenerationResult> {
+/**
+ * Generate text (placeholder - will be implemented in Task 9)
+ */
+  async generate(
+    modelId: string,
+    messages: InferenceChatMessage[],
+    settings: GenerationDefaults
+  ): Promise<GenerationResult> {
+    if (this.disposed) {
+      throw new ModelManagerCancellationError('Manager disposed')
+    }
+
     if (!this.probed) {
       return {
         success: false,
@@ -295,9 +452,12 @@ export class ModelManager {
       }
     }
 
+    this.resolveSupersededRequests('generate')
+
     return new Promise((resolve, reject) => {
       const requestId = generateRequestId()
       this.currentRequestId = requestId
+      this.activeRequestIds.add(requestId)
 
       this.pendingRequests.set(`generate:${modelId}`, {
         requestId,
@@ -311,7 +471,8 @@ export class ModelManager {
         type: 'generate',
         requestId,
         modelId,
-        prompt,
+        messages,
+        settings,
       })
     })
   }
@@ -333,13 +494,16 @@ export class ModelManager {
    * Switch to a different model
    */
   async switchModel(nextModelId: string): Promise<void> {
+    if (this.disposed) {
+      throw new ModelManagerCancellationError('Manager disposed')
+    }
+
     // Interrupt any active generation
     if (this.hasActiveRequest()) {
       this.interrupt()
     }
 
-    // Clear current state
-    this.currentRequestId = null
+    this.rejectAllPendingRequests('Model switch interrupted an in-flight request')
     
     // Dispose and recreate worker for clean state
     this.client.terminate()
@@ -350,17 +514,25 @@ export class ModelManager {
     this.probed = false
     this.loadStartTime = null
     this.warmupStartTime = null
-    this.pendingRequests.clear()
 
     // Probe and load the new model
     await this.probe()
-    await this.loadModel(nextModelId)
+    const loadResult = await this.loadModel(nextModelId)
+
+    if (!loadResult.success) {
+      throw new Error(loadResult.error ?? 'Failed to load model')
+    }
   }
 
   /**
    * Dispose and clean up
    */
   dispose(): void {
+    if (this.disposed) {
+      return
+    }
+
+    this.disposed = true
     this.client.terminate()
     this.rejectAllPendingRequests('Manager disposed')
     this.currentRequestId = null
@@ -368,6 +540,7 @@ export class ModelManager {
     this.probed = false
     this.loadStartTime = null
     this.warmupStartTime = null
+    this.resetGenerationTracking()
   }
 
   /**

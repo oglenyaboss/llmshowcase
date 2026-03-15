@@ -2,7 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type {
   WorkerEvent,
   CapabilityProbeResult,
+  InferenceChatMessage,
+  GenerationDefaults,
 } from '@/runtime/inference-types'
+
+const testMessages: InferenceChatMessage[] = [
+  { role: 'system', content: 'You are helpful.' },
+  { role: 'user', content: 'Hello' },
+]
+
+const testSettings: GenerationDefaults = {
+  doSample: true,
+  temperature: 0.7,
+  topP: 0.8,
+  topK: 20,
+  repetitionPenalty: 1.05,
+  maxNewTokens: 256,
+}
 
 let capturedOnEvent: ((event: WorkerEvent) => void) | null = null
 let mockCalls: { method: string; args: unknown[] }[] = []
@@ -29,7 +45,10 @@ vi.mock('@/runtime/worker-client', () => {
   }
 })
 
-import { ModelManager } from '@/runtime/model-manager'
+import {
+  ModelManager,
+  type ModelManagerCallbacks,
+} from '@/runtime/model-manager'
 
 function emitEvent(event: WorkerEvent): void {
   if (capturedOnEvent) {
@@ -47,18 +66,7 @@ function wasCalledWith(method: string, ...args: unknown[]): boolean {
 
 describe('ModelManager', () => {
   let manager: ModelManager
-  let callbacks: {
-    onProbeResult: ReturnType<typeof vi.fn>
-    onLoadStarted: ReturnType<typeof vi.fn>
-    onLoadProgress: ReturnType<typeof vi.fn>
-    onWarmingStarted: ReturnType<typeof vi.fn>
-    onModelReady: ReturnType<typeof vi.fn>
-    onGenerationStarted: ReturnType<typeof vi.fn>
-    onStreamDelta: ReturnType<typeof vi.fn>
-    onGenerationComplete: ReturnType<typeof vi.fn>
-    onGenerationInterrupted: ReturnType<typeof vi.fn>
-    onRuntimeError: ReturnType<typeof vi.fn>
-  }
+  let callbacks: ModelManagerCallbacks
 
   beforeEach(() => {
     mockCalls = []
@@ -175,7 +183,7 @@ describe('ModelManager', () => {
 
   describe('generate', () => {
     it('rejects when probe not called first', async () => {
-      const result = await manager.generate('qwen-0.8b', 'Hello')
+      const result = await manager.generate('qwen-0.8b', testMessages, testSettings)
 
       expect(result.success).toBe(false)
       expect(result.error).toBe('Must probe capabilities before generating')
@@ -195,7 +203,7 @@ describe('ModelManager', () => {
       })
       await probePromise
 
-      const result = await manager.generate('qwen-0.8b', 'Hello')
+      const result = await manager.generate('qwen-0.8b', testMessages, testSettings)
 
       expect(result.success).toBe(false)
       expect(result.error).toBe('Model not loaded. Call loadModel first.')
@@ -218,7 +226,7 @@ describe('ModelManager', () => {
       await probePromise
 
       mockCalls = []
-      void manager.loadModel('qwen-0.8b')
+      const firstLoadPromise = manager.loadModel('qwen-0.8b')
 
       const firstCall = getMockCalls('sendRequest').find(
         (c) => (c.args[0] as { modelId: string }).modelId === 'qwen-0.8b'
@@ -231,6 +239,12 @@ describe('ModelManager', () => {
         (c) => (c.args[0] as { modelId: string }).modelId === 'qwen-2b'
       )
       const secondRequestId = (secondCall?.args[0] as { requestId: string })?.requestId
+
+      await expect(firstLoadPromise).resolves.toMatchObject({
+        success: false,
+        modelId: 'qwen-0.8b',
+        error: 'Superseded by a newer model request',
+      })
 
       emitEvent({
         type: 'model_ready',
@@ -450,7 +464,7 @@ describe('ModelManager', () => {
       await loadPromise
 
       mockCalls = []
-      const generatePromise = manager.generate('qwen-0.8b', 'Hello')
+      const generatePromise = manager.generate('qwen-0.8b', testMessages, testSettings)
 
       const generateRequest = getMockCalls('sendRequest')[0].args[0] as { requestId: string }
 
@@ -473,7 +487,7 @@ describe('ModelManager', () => {
 
       const result = await generatePromise
       expect(result.interrupted).toBe(true)
-      expect(callbacks.onGenerationInterrupted).toHaveBeenCalledWith('qwen-0.8b')
+      expect(callbacks.onGenerationInterrupted).toHaveBeenCalledWith('qwen-0.8b', 0, 0)
     })
   })
 })

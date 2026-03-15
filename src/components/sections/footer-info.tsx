@@ -18,9 +18,9 @@ export function FooterInfo() {
               <Shield className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <span className="text-sm font-medium">Local Inference</span>
+              <span className="text-sm font-medium">Local & Private</span>
               <p className="text-xs text-muted-foreground">
-                Your data never leaves your browser
+                Chats persist locally—nothing leaves your browser
               </p>
             </div>
           </div>
@@ -36,7 +36,7 @@ export function FooterInfo() {
             WebGPU
           </Badge>
           <span className="text-xs text-muted-foreground">
-            Powered by Transformers.js & ONNX Runtime
+            Persistent local history
           </span>
         </div>
       </div>

@@ -1,5 +1,5 @@
 /**
- * Centralized error copy for the browser-native Qwen showcase
+ * Centralized error copy for the browser-native Qwen chat
  * All user-facing error messages are defined here for consistency
  */
 
@@ -9,7 +9,7 @@ export const ERROR_MESSAGES = {
   modelInitFailure: 'The selected model could not be initialized on this device. Try Qwen 0.8B or switch to a more capable GPU.',
   warmupFailure: 'The model downloaded, but WebGPU warmup failed before generation could start.',
   generationFailure: 'Generation stopped because the browser runtime reported an inference error.',
-  cacheTrouble: 'If downloads get stuck after a refresh, clear this site\'s browser data and retry.',
+  cacheTrouble: 'If chat history downloads get stuck after a refresh, clear this site\'s browser data and retry.',
 } as const
 
 export type ErrorType = keyof typeof ERROR_MESSAGES

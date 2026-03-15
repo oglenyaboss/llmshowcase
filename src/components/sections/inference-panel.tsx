@@ -11,7 +11,9 @@ import {
   selectCanStop,
   selectIsLoading,
   selectLoadProgress,
-  selectLoadStatus 
+  selectLoadStatus,
+  selectActiveChatDraft,
+  selectStatusMessage
 } from '@/state/showcase-selectors'
 import { Play, Square, Loader2 } from 'lucide-react'
 
@@ -23,15 +25,16 @@ export function InferencePanel() {
   const isLoading = selectIsLoading(state)
   const loadProgress = selectLoadProgress(state)
   const loadStatus = selectLoadStatus(state)
-  const { promptText, statusMessage } = state
+  const promptText = selectActiveChatDraft(state)
+  const statusMessage = selectStatusMessage(state)
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    dispatch({ type: 'SET_PROMPT', payload: e.target.value })
+    dispatch({ type: 'SET_ACTIVE_CHAT_DRAFT', payload: e.target.value })
   }
 
   const handleGenerate = () => {
     if (canGenerate) {
-      dispatch({ type: 'GENERATION_START' })
+      dispatch({ type: 'GENERATION_ENQUEUE', payload: { draftText: promptText } })
     }
   }
 

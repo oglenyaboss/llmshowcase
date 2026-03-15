@@ -4,26 +4,25 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { modelList } from '@/config/models'
 import { useShowcaseState } from '@/state/showcase-context'
+import { selectActiveChatModelId } from '@/state/showcase-selectors'
 import { cn } from '@/lib/utils'
 import { Check, AlertTriangle } from 'lucide-react'
 
 export function ModelSelectorCard() {
   const { state, dispatch } = useShowcaseState()
-  const selectedModelId = state.selectedModelId
+  const selectedModelId = selectActiveChatModelId(state)
   const runtimePhase = state.runtimePhase
 
-  const isLoading = ['loading_model', 'warming_model'].includes(runtimePhase)
-  const isGenerating = runtimePhase === 'generating'
+  const isLoading = ['loading_model', 'warming_model', 'generating', 'stopping'].includes(runtimePhase)
 
   const handleSelectModel = (modelId: string) => {
     if (isLoading || modelId === selectedModelId) return
 
-    if (isGenerating) {
-      dispatch({ type: 'STOP_REQUEST' })
-    }
+    dispatch({ type: 'SET_ACTIVE_CHAT_MODEL', payload: modelId })
 
-    dispatch({ type: 'SELECT_MODEL', payload: modelId })
-    dispatch({ type: 'RESET_FOR_MODEL_SWITCH' })
+    if (runtimePhase === 'error') {
+      dispatch({ type: 'RESET_FOR_MODEL_SWITCH' })
+    }
   }
 
   const selectedModel = modelList.find((m) => m.id === selectedModelId)

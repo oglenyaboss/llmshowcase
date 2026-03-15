@@ -5,6 +5,8 @@ import {
   useContext,
   useReducer,
   useMemo,
+  useEffect,
+  useRef,
   type ReactNode,
 } from 'react'
 import {
@@ -13,6 +15,11 @@ import {
   type ShowcaseState,
   type ShowcaseAction,
 } from './showcase-reducer'
+import {
+  loadPersistedShowcaseState,
+  savePersistedShowcaseState,
+  createFreshPersistedStateFromDefaults,
+} from './showcase-storage'
 
 interface ShowcaseContextValue {
   state: ShowcaseState
@@ -26,6 +33,8 @@ interface ShowcaseProviderProps {
   initialState?: Partial<ShowcaseState>
 }
 
+const PERSIST_DEBOUNCE_MS = 300
+
 export function ShowcaseProvider({ children, initialState }: ShowcaseProviderProps) {
   const [state, dispatch] = useReducer(
     showcaseReducer,
@@ -33,6 +42,67 @@ export function ShowcaseProvider({ children, initialState }: ShowcaseProviderPro
       ? { ...initialShowcaseState, ...initialState }
       : initialShowcaseState
   )
+
+  const hydrationRef = useRef(false)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (hydrationRef.current) return
+    hydrationRef.current = true
+
+    loadPersistedShowcaseState()
+      .then((persisted) => {
+        if (persisted) {
+          dispatch({
+            type: 'HYDRATE_SUCCESS',
+            payload: {
+              activeChatId: persisted.activeChatId,
+              newChatDefaults: persisted.newChatDefaults,
+              chats: persisted.chats,
+            },
+          })
+        } else {
+          const fresh = createFreshPersistedStateFromDefaults()
+          dispatch({
+            type: 'HYDRATE_SUCCESS',
+            payload: {
+              activeChatId: fresh.activeChatId,
+              newChatDefaults: fresh.newChatDefaults,
+              chats: fresh.chats,
+            },
+          })
+        }
+      })
+      .catch(() => {
+        const fresh = createFreshPersistedStateFromDefaults()
+        dispatch({
+          type: 'HYDRATE_FAILURE',
+          payload: {
+            activeChatId: fresh.activeChatId,
+            newChatDefaults: fresh.newChatDefaults,
+            chats: fresh.chats,
+          },
+        })
+      })
+  }, [])
+
+  useEffect(() => {
+    if (state.hydrationStatus !== 'ready') return
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      savePersistedShowcaseState(state).catch(() => {})
+    }, PERSIST_DEBOUNCE_MS)
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [state])
 
   const value = useMemo(
     () => ({ state, dispatch }),

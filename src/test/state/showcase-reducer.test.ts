@@ -2,31 +2,326 @@ import { describe, it, expect } from 'vitest'
 import {
   showcaseReducer,
   initialShowcaseState,
+  createFreshChat,
+  getDefaultNewChatDefaults,
   type ShowcaseState,
-  type ShowcaseAction,
 } from '@/state/showcase-reducer'
 import {
   selectCanGenerate,
   selectWarmState,
   selectRuntimePhase,
   selectCurrentError,
-  selectSelectedModelId,
-  selectOutputText,
-  selectTokenCount,
   selectCanClearError,
+  selectActiveChatModelId,
+  selectActiveChatDraft,
+  selectStreamedOutput,
+  selectActiveChatTitle,
+  selectActiveChatSystemPrompt,
+  selectActiveChatInferenceSettings,
+  selectActiveChatMessages,
+  selectNewChatDefaults,
+  selectIsLastAssistantInterrupted,
+  selectLastAssistantMessage,
+  selectIsHydrated,
+  selectIsBooting,
+  selectIsBusy,
 } from '@/state/showcase-selectors'
 import type { CapabilityProbeResult } from '@/runtime/inference-types'
+import { DEFAULT_SYSTEM_PROMPT } from '@/state/showcase-types'
+
+function createHydratedState(): ShowcaseState {
+  const defaults = getDefaultNewChatDefaults()
+  const chat = createFreshChat(defaults, 'test-chat-1')
+  return showcaseReducer(initialShowcaseState, {
+    type: 'HYDRATE_SUCCESS',
+    payload: {
+      activeChatId: chat.id,
+      newChatDefaults: defaults,
+      chats: [chat],
+    },
+  })
+}
 
 describe('showcase-reducer', () => {
   describe('initial state', () => {
     it('has correct default values', () => {
-      expect(initialShowcaseState.selectedModelId).toBe('qwen-0.8b')
+      expect(initialShowcaseState.activeChatId).toBe('')
+      expect(initialShowcaseState.chats.length).toBe(0)
+      expect(initialShowcaseState.hydrationStatus).toBe('booting')
       expect(initialShowcaseState.runtimePhase).toBe('idle')
       expect(initialShowcaseState.warmState).toBe('cold')
-      expect(initialShowcaseState.promptText).toBe('')
-      expect(initialShowcaseState.outputText).toBe('')
       expect(initialShowcaseState.currentError).toBeNull()
       expect(initialShowcaseState.tokenCount).toBe(0)
+    })
+
+    it('starts with empty chats array (hydration creates the first chat)', () => {
+      expect(initialShowcaseState.chats).toHaveLength(0)
+      expect(initialShowcaseState.activeChatId).toBe('')
+    })
+
+    it('has correct new chat defaults', () => {
+      const defaults = selectNewChatDefaults(initialShowcaseState)
+      expect(defaults.modelId).toBe('qwen-0.8b')
+      expect(defaults.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT)
+    })
+  })
+
+  describe('createFreshChat', () => {
+    it('creates a chat with defaults', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chat = createFreshChat(defaults)
+      expect(chat.title).toBe('New chat')
+      expect(chat.isCustomTitle).toBe(false)
+      expect(chat.messages).toEqual([])
+      expect(chat.draftMessage).toBe('')
+      expect(chat.modelId).toBe(defaults.modelId)
+      expect(chat.systemPrompt).toBe(defaults.systemPrompt)
+    })
+
+    it('accepts custom id', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chat = createFreshChat(defaults, 'custom-id')
+      expect(chat.id).toBe('custom-id')
+    })
+  })
+
+  describe('HYDRATE_SUCCESS', () => {
+    it('hydrates with valid state', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chat = createFreshChat(defaults, 'chat-1')
+      chat.title = 'Hydrated chat'
+      
+      const state = showcaseReducer(initialShowcaseState, {
+        type: 'HYDRATE_SUCCESS',
+        payload: {
+          activeChatId: 'chat-1',
+          newChatDefaults: defaults,
+          chats: [chat],
+        },
+      })
+
+      expect(state.hydrationStatus).toBe('ready')
+      expect(state.activeChatId).toBe('chat-1')
+      expect(state.chats[0].title).toBe('Hydrated chat')
+    })
+
+    it('creates fresh chat when chats array is empty', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const state = showcaseReducer(initialShowcaseState, {
+        type: 'HYDRATE_SUCCESS',
+        payload: {
+          activeChatId: '',
+          newChatDefaults: defaults,
+          chats: [],
+        },
+      })
+
+      expect(state.chats).toHaveLength(1)
+      expect(state.activeChatId).toBe(state.chats[0].id)
+      expect(state.hydrationStatus).toBe('ready')
+    })
+
+    it('selects first chat when activeChatId is invalid', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chat = createFreshChat(defaults, 'chat-1')
+      
+      const state = showcaseReducer(initialShowcaseState, {
+        type: 'HYDRATE_SUCCESS',
+        payload: {
+          activeChatId: 'non-existent',
+          newChatDefaults: defaults,
+          chats: [chat],
+        },
+      })
+
+      expect(state.activeChatId).toBe('chat-1')
+    })
+  })
+
+  describe('HYDRATE_FAILURE', () => {
+    it('recovers with fresh state and becomes usable', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chat = createFreshChat(defaults, 'recovery-chat')
+      
+      const state = showcaseReducer(initialShowcaseState, {
+        type: 'HYDRATE_FAILURE',
+        payload: {
+          activeChatId: 'recovery-chat',
+          newChatDefaults: defaults,
+          chats: [chat],
+        },
+      })
+
+      expect(state.hydrationStatus).toBe('ready')
+      expect(state.runtimePhase).toBe('idle')
+    })
+  })
+
+  describe('CREATE_CHAT', () => {
+    it('creates a new chat and selects it', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, { type: 'CREATE_CHAT' })
+      
+      expect(state.chats).toHaveLength(2)
+      expect(state.activeChatId).toBe(state.chats[1].id)
+    })
+
+    it('uses custom modelId when provided', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'CREATE_CHAT',
+        payload: { modelId: 'qwen-2b' },
+      })
+
+      const newChat = state.chats[1]
+      expect(newChat.modelId).toBe('qwen-2b')
+    })
+
+    it('uses custom system prompt when provided', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'CREATE_CHAT',
+        payload: { systemPrompt: 'Custom system prompt' },
+      })
+
+      const newChat = state.chats[1]
+      expect(newChat.systemPrompt).toBe('Custom system prompt')
+    })
+  })
+
+  describe('SELECT_CHAT', () => {
+    it('selects an existing chat', () => {
+      let state = createHydratedState()
+      state = showcaseReducer(state, { type: 'CREATE_CHAT' })
+      const firstChatId = state.chats[0].id
+      
+      state = showcaseReducer(state, { type: 'SELECT_CHAT', payload: firstChatId })
+      
+      expect(state.activeChatId).toBe(firstChatId)
+    })
+
+    it('ignores non-existent chat id', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'SELECT_CHAT',
+        payload: 'non-existent-id',
+      })
+      
+      expect(state.activeChatId).toBe(hydratedState.activeChatId)
+    })
+  })
+
+  describe('RENAME_CHAT', () => {
+    it('renames a chat and sets isCustomTitle', () => {
+      const hydratedState = createHydratedState()
+      const chatId = hydratedState.activeChatId
+      const state = showcaseReducer(hydratedState, {
+        type: 'RENAME_CHAT',
+        payload: { chatId, title: 'New Title' },
+      })
+
+      expect(selectActiveChatTitle(state)).toBe('New Title')
+      expect(state.chats[0].isCustomTitle).toBe(true)
+    })
+
+    it('ignores non-existent chat', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'RENAME_CHAT',
+        payload: { chatId: 'non-existent', title: 'New Title' },
+      })
+
+      expect(state.chats[0].title).toBe('New chat')
+    })
+  })
+
+  describe('DELETE_CHAT', () => {
+    it('deletes a chat and selects another', () => {
+      let state = createHydratedState()
+      state = showcaseReducer(state, { type: 'CREATE_CHAT' })
+      const firstChatId = state.chats[0].id
+      
+      state = showcaseReducer(state, { type: 'DELETE_CHAT', payload: firstChatId })
+      
+      expect(state.chats).toHaveLength(1)
+      expect(state.activeChatId).toBe(state.chats[0].id)
+    })
+
+    it('creates replacement chat when deleting the last one', () => {
+      const hydratedState = createHydratedState()
+      const chatId = hydratedState.activeChatId
+      const state = showcaseReducer(hydratedState, {
+        type: 'DELETE_CHAT',
+        payload: chatId,
+      })
+
+      expect(state.chats).toHaveLength(1)
+      expect(state.chats[0].id).not.toBe(chatId)
+      expect(state.chats[0].title).toBe('New chat')
+    })
+  })
+
+  describe('SET_ACTIVE_CHAT_SYSTEM_PROMPT', () => {
+    it('updates the system prompt', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'SET_ACTIVE_CHAT_SYSTEM_PROMPT',
+        payload: 'You are a helpful coding assistant.',
+      })
+
+      expect(selectActiveChatSystemPrompt(state)).toBe('You are a helpful coding assistant.')
+    })
+  })
+
+  describe('UPDATE_ACTIVE_CHAT_SETTINGS', () => {
+    it('updates inference settings', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'UPDATE_ACTIVE_CHAT_SETTINGS',
+        payload: { temperature: 0.5, maxNewTokens: 512 },
+      })
+
+      const settings = selectActiveChatInferenceSettings(state)
+      expect(settings.temperature).toBe(0.5)
+      expect(settings.maxNewTokens).toBe(512)
+    })
+  })
+
+  describe('RESET_ACTIVE_CHAT_SETTINGS_TO_DEFAULTS', () => {
+    it('resets settings to new chat defaults', () => {
+      const hydratedState = createHydratedState()
+      let state = showcaseReducer(hydratedState, {
+        type: 'UPDATE_ACTIVE_CHAT_SETTINGS',
+        payload: { temperature: 0.9 },
+      })
+      
+      state = showcaseReducer(state, { type: 'RESET_ACTIVE_CHAT_SETTINGS_TO_DEFAULTS' })
+
+      const settings = selectActiveChatInferenceSettings(state)
+      expect(settings.temperature).toBe(0.7)
+    })
+  })
+
+  describe('SAVE_ACTIVE_CHAT_SETTINGS_AS_DEFAULTS', () => {
+    it('saves current chat settings as new chat defaults', () => {
+      const hydratedState = createHydratedState()
+      let state = showcaseReducer(hydratedState, {
+        type: 'SET_ACTIVE_CHAT_MODEL',
+        payload: 'qwen-2b',
+      })
+      state = showcaseReducer(state, {
+        type: 'UPDATE_ACTIVE_CHAT_SETTINGS',
+        payload: { temperature: 0.3 },
+      })
+      state = showcaseReducer(state, {
+        type: 'SET_ACTIVE_CHAT_SYSTEM_PROMPT',
+        payload: 'Custom prompt',
+      })
+      state = showcaseReducer(state, { type: 'SAVE_ACTIVE_CHAT_SETTINGS_AS_DEFAULTS' })
+
+      const defaults = selectNewChatDefaults(state)
+      expect(defaults.modelId).toBe('qwen-2b')
+      expect(defaults.systemPrompt).toBe('Custom prompt')
     })
   })
 
@@ -86,64 +381,35 @@ describe('showcase-reducer', () => {
     })
   })
 
-  describe('SELECT_MODEL', () => {
-    it('changes selected model', () => {
-      const state = showcaseReducer(initialShowcaseState, {
-        type: 'SELECT_MODEL',
-        payload: 'qwen-2b',
-      })
-      expect(state.selectedModelId).toBe('qwen-2b')
-      expect(state.telemetry.selectedModelLabel).toBe('Qwen 3.5 2B')
-    })
-
-    it('resets warm state to cold', () => {
-      const warmState: ShowcaseState = {
+  describe('SET_ACTIVE_CHAT_MODEL', () => {
+    it('changes selected model in active chat', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const testState: ShowcaseState = {
         ...initialShowcaseState,
-        warmState: 'warm',
-        runtimePhase: 'ready',
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
       }
-      const state = showcaseReducer(warmState, {
-        type: 'SELECT_MODEL',
+      const state = showcaseReducer(testState, {
+        type: 'SET_ACTIVE_CHAT_MODEL',
         payload: 'qwen-2b',
       })
-      expect(state.warmState).toBe('cold')
-    })
-
-    it('clears output and timings on model switch', () => {
-      const stateWithOutput: ShowcaseState = {
-        ...initialShowcaseState,
-        outputText: 'previous output',
-        streamedOutput: 'streaming',
-        tokenCount: 100,
-        loadProgress: 80,
-        loadStatus: 'Loading...',
-      }
-      const state = showcaseReducer(stateWithOutput, {
-        type: 'SELECT_MODEL',
-        payload: 'qwen-2b',
-      })
-      expect(state.outputText).toBe('')
-      expect(state.streamedOutput).toBe('')
-      expect(state.tokenCount).toBe(0)
-      expect(state.loadProgress).toBe(0)
-      expect(state.loadStatus).toBe('')
-    })
-
-    it('preserves experimental tier for 4B model', () => {
-      const state = showcaseReducer(initialShowcaseState, {
-        type: 'SELECT_MODEL',
-        payload: 'qwen-4b',
-      })
-      expect(state.selectedModelId).toBe('qwen-4b')
-      expect(state.telemetry.supportTier).toBe('experimental')
+      expect(selectActiveChatModelId(state)).toBe('qwen-2b')
     })
 
     it('ignores invalid model ID', () => {
-      const state = showcaseReducer(initialShowcaseState, {
-        type: 'SELECT_MODEL',
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const testState: ShowcaseState = {
+        ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
+      }
+      const state = showcaseReducer(testState, {
+        type: 'SET_ACTIVE_CHAT_MODEL',
         payload: 'invalid-model',
       })
-      expect(state.selectedModelId).toBe('qwen-0.8b')
+      expect(selectActiveChatModelId(state)).toBe('qwen-0.8b')
     })
   })
 
@@ -214,119 +480,192 @@ describe('showcase-reducer', () => {
     })
   })
 
-  describe('SET_PROMPT', () => {
-    it('updates prompt text', () => {
-      const state = showcaseReducer(initialShowcaseState, {
-        type: 'SET_PROMPT',
+  describe('SET_ACTIVE_CHAT_DRAFT', () => {
+    it('updates draft message', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const testState: ShowcaseState = {
+        ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
+      }
+      const state = showcaseReducer(testState, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
         payload: 'Hello, world!',
       })
-      expect(state.promptText).toBe('Hello, world!')
+      expect(selectActiveChatDraft(state)).toBe('Hello, world!')
     })
+  })
 
-    it('clears selected preset when manually editing', () => {
-      const stateWithPreset: ShowcaseState = {
+  describe('APPLY_PROMPT_STARTER', () => {
+    it('sets draft message', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const testState: ShowcaseState = {
         ...initialShowcaseState,
-        selectedPresetId: 'summarize',
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
       }
-      const state = showcaseReducer(stateWithPreset, {
-        type: 'SET_PROMPT',
-        payload: 'Custom prompt',
+      const state = showcaseReducer(testState, {
+        type: 'APPLY_PROMPT_STARTER',
+        payload: 'Summarize this...',
       })
-      expect(state.selectedPresetId).toBeNull()
+      expect(selectActiveChatDraft(state)).toBe('Summarize this...')
     })
   })
 
-  describe('APPLY_PRESET', () => {
-    it('sets prompt text and preset ID', () => {
-      const state = showcaseReducer(initialShowcaseState, {
-        type: 'APPLY_PRESET',
-        payload: { presetId: 'summarize', text: 'Summarize this...' },
-      })
-      expect(state.promptText).toBe('Summarize this...')
-      expect(state.selectedPresetId).toBe('summarize')
-    })
-  })
-
-  describe('GENERATION_START', () => {
-    it('starts generation from ready phase with prompt', () => {
+  describe('GENERATION_ENQUEUE', () => {
+    it('starts generation from ready phase with draft', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
       const readyState: ShowcaseState = {
         ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat({ ...defaults, modelId: 'qwen-0.8b', systemPrompt: defaults.systemPrompt, inferenceSettings: defaults.inferenceSettings }, chatId)],
         runtimePhase: 'ready',
-        promptText: 'Test prompt',
+        hydrationStatus: 'ready',
       }
-      const state = showcaseReducer(readyState, { type: 'GENERATION_START' })
+      const withDraft = showcaseReducer(readyState, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Test prompt',
+      })
+      const state = showcaseReducer(withDraft, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
       expect(state.runtimePhase).toBe('generating')
-      expect(state.streamedOutput).toBe('')
+      expect(state.activeAssistantMessageId).not.toBeNull()
       expect(state.generationStartedAt).not.toBeNull()
     })
 
     it('blocks generation from idle phase', () => {
-      const state = showcaseReducer(initialShowcaseState, { type: 'GENERATION_START' })
+      const state = showcaseReducer(initialShowcaseState, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
       expect(state.runtimePhase).toBe('idle')
     })
 
-    it('blocks generation with empty prompt', () => {
+    it('blocks generation with empty draft', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
       const readyState: ShowcaseState = {
         ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
         runtimePhase: 'ready',
-        promptText: '   ',
+        hydrationStatus: 'ready',
       }
-      const state = showcaseReducer(readyState, { type: 'GENERATION_START' })
+      const state = showcaseReducer(readyState, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: '   ' },
+      })
       expect(state.runtimePhase).toBe('ready')
     })
 
-    it('blocks generation from unsupported state', () => {
+    it('blocks generation from unsupported phase', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
       const unsupportedState: ShowcaseState = {
         ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
         runtimePhase: 'unsupported',
-        promptText: 'Test prompt',
+        hydrationStatus: 'ready',
       }
-      const state = showcaseReducer(unsupportedState, { type: 'GENERATION_START' })
+      const state = showcaseReducer(unsupportedState, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
       expect(state.runtimePhase).toBe('unsupported')
     })
   })
 
   describe('GENERATION_STREAM', () => {
     it('appends token to streamed output', () => {
-      const generatingState: ShowcaseState = {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const readyState: ShowcaseState = {
         ...initialShowcaseState,
-        runtimePhase: 'generating',
-        streamedOutput: 'Hello',
+        activeChatId: chatId,
+        chats: [createFreshChat({ ...defaults, modelId: 'qwen-0.8b', systemPrompt: defaults.systemPrompt, inferenceSettings: defaults.inferenceSettings }, chatId)],
+        runtimePhase: 'ready',
+        hydrationStatus: 'ready',
       }
-      const state = showcaseReducer(generatingState, {
+      const withDraft = showcaseReducer(readyState, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Test prompt',
+      })
+      const enqueuedState = showcaseReducer(withDraft, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
+
+      const state = showcaseReducer(enqueuedState, {
         type: 'GENERATION_STREAM',
         payload: { token: ' world' },
       })
-      expect(state.streamedOutput).toBe('Hello world')
+      expect(selectStreamedOutput(state)).toBe(' world')
     })
   })
 
   describe('GENERATION_COMPLETE', () => {
     it('transitions to ready and updates telemetry', () => {
-      const generatingState: ShowcaseState = {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const readyState: ShowcaseState = {
         ...initialShowcaseState,
-        runtimePhase: 'generating',
-        streamedOutput: 'Generated text',
-        generationStartedAt: Date.now() - 1000,
+        activeChatId: chatId,
+        chats: [createFreshChat({ ...defaults, modelId: 'qwen-0.8b', systemPrompt: defaults.systemPrompt, inferenceSettings: defaults.inferenceSettings }, chatId)],
+        runtimePhase: 'ready',
+        hydrationStatus: 'ready',
       }
-      const state = showcaseReducer(generatingState, {
+      const withDraft = showcaseReducer(readyState, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Test prompt',
+      })
+      const enqueuedState = showcaseReducer(withDraft, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
+      const streamingState = showcaseReducer(enqueuedState, {
+        type: 'GENERATION_STREAM',
+        payload: { token: 'Generated text' },
+      })
+
+      const state = showcaseReducer(streamingState, {
         type: 'GENERATION_COMPLETE',
         payload: { tokenCount: 50, durationMs: 1000 },
       })
       expect(state.runtimePhase).toBe('ready')
-      expect(state.outputText).toBe('Generated text')
       expect(state.tokenCount).toBe(50)
       expect(state.telemetry.approxTokenCount).toBe(50)
-      expect(state.telemetry.approxTokensPerSecond).toBe(50)
+
+      const activeChat = state.chats.find(c => c.id === state.activeChatId)
+      const assistantMessage = activeChat?.messages.find(m => m.role === 'assistant')
+      expect(assistantMessage?.status).toBe('complete')
     })
   })
 
   describe('STOP_REQUEST', () => {
     it('transitions to stopping phase from generating', () => {
-      const generatingState: ShowcaseState = {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const readyState: ShowcaseState = {
         ...initialShowcaseState,
-        runtimePhase: 'generating',
+        activeChatId: chatId,
+        chats: [createFreshChat({ ...defaults, modelId: 'qwen-0.8b', systemPrompt: defaults.systemPrompt, inferenceSettings: defaults.inferenceSettings }, chatId)],
+        runtimePhase: 'ready',
+        hydrationStatus: 'ready',
       }
+      const withDraft = showcaseReducer(readyState, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Test prompt',
+      })
+      const generatingState = showcaseReducer(withDraft, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
       const state = showcaseReducer(generatingState, { type: 'STOP_REQUEST' })
       expect(state.runtimePhase).toBe('stopping')
     })
@@ -339,16 +678,36 @@ describe('showcase-reducer', () => {
 
   describe('GENERATION_INTERRUPTED', () => {
     it('transitions to ready phase (not error)', () => {
-      const stoppingState: ShowcaseState = {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const readyState: ShowcaseState = {
         ...initialShowcaseState,
-        runtimePhase: 'stopping',
-        streamedOutput: 'Partial output',
-        generationStartedAt: Date.now(),
+        activeChatId: chatId,
+        chats: [createFreshChat({ ...defaults, modelId: 'qwen-0.8b', systemPrompt: defaults.systemPrompt, inferenceSettings: defaults.inferenceSettings }, chatId)],
+        runtimePhase: 'ready',
+        hydrationStatus: 'ready',
       }
+      const withDraft = showcaseReducer(readyState, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Test prompt',
+      })
+      const enqueuedState = showcaseReducer(withDraft, {
+        type: 'GENERATION_ENQUEUE',
+        payload: { draftText: 'Test prompt' },
+      })
+      const streamingState = showcaseReducer(enqueuedState, {
+        type: 'GENERATION_STREAM',
+        payload: { token: 'Partial output' },
+      })
+
+      const stoppingState = showcaseReducer(streamingState, { type: 'STOP_REQUEST' })
       const state = showcaseReducer(stoppingState, { type: 'GENERATION_INTERRUPTED' })
       expect(state.runtimePhase).toBe('ready')
-      expect(state.outputText).toBe('Partial output')
       expect(state.generationStartedAt).toBeNull()
+
+      const activeChat = state.chats.find(c => c.id === state.activeChatId)
+      const assistantMessage = activeChat?.messages.find(m => m.role === 'assistant')
+      expect(assistantMessage?.status).toBe('interrupted')
     })
   })
 
@@ -385,13 +744,11 @@ describe('showcase-reducer', () => {
         ...initialShowcaseState,
         runtimePhase: 'ready',
         warmState: 'warm',
-        outputText: 'output',
         tokenCount: 100,
       }
       const state = showcaseReducer(readyState, { type: 'RESET_FOR_MODEL_SWITCH' })
       expect(state.runtimePhase).toBe('idle')
       expect(state.warmState).toBe('cold')
-      expect(state.outputText).toBe('')
       expect(state.tokenCount).toBe(0)
     })
   })
@@ -434,31 +791,68 @@ describe('showcase-reducer', () => {
 
 describe('showcase-selectors', () => {
   describe('selectCanGenerate', () => {
-    it('returns true when ready with prompt', () => {
+    it('returns true when ready with draft and hydrated', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
       const state: ShowcaseState = {
         ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat({ ...defaults, modelId: 'qwen-0.8b', systemPrompt: defaults.systemPrompt, inferenceSettings: defaults.inferenceSettings }, chatId)],
         runtimePhase: 'ready',
-        promptText: 'Hello',
+        hydrationStatus: 'ready',
       }
-      expect(selectCanGenerate(state)).toBe(true)
+      const withDraft = showcaseReducer(state, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Hello',
+      })
+      expect(selectCanGenerate(withDraft)).toBe(true)
     })
 
-    it('returns false when ready but empty prompt', () => {
+    it('returns false when ready but empty draft', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
       const state: ShowcaseState = {
         ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
         runtimePhase: 'ready',
-        promptText: '',
+        hydrationStatus: 'ready',
       }
       expect(selectCanGenerate(state)).toBe(false)
     })
 
     it('returns false when not ready', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
       const state: ShowcaseState = {
         ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
         runtimePhase: 'loading_model',
-        promptText: 'Hello',
+        hydrationStatus: 'ready',
       }
-      expect(selectCanGenerate(state)).toBe(false)
+      const withDraft = showcaseReducer(state, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Hello',
+      })
+      expect(selectCanGenerate(withDraft)).toBe(false)
+    })
+
+    it('returns false when not hydrated', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chatId = 'test-chat-id'
+      const state: ShowcaseState = {
+        ...initialShowcaseState,
+        activeChatId: chatId,
+        chats: [createFreshChat(defaults, chatId)],
+        runtimePhase: 'ready',
+        hydrationStatus: 'booting',
+      }
+      const withDraft = showcaseReducer(state, {
+        type: 'SET_ACTIVE_CHAT_DRAFT',
+        payload: 'Hello',
+      })
+      expect(selectCanGenerate(withDraft)).toBe(false)
     })
   })
 

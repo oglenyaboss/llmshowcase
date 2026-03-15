@@ -9,10 +9,13 @@ import {
   Qwen3_5ForConditionalGeneration,
   TextStreamer,
   InterruptableStoppingCriteria,
-  type PreTrainedModel,
-  type Processor,
-  type PreTrainedTokenizer,
-  type StoppingCriteria,
+} from '@huggingface/transformers'
+
+import type {
+  PreTrainedModel,
+  Processor,
+  PreTrainedTokenizer,
+  StoppingCriteria,
 } from '@huggingface/transformers'
 
 import type {
@@ -28,37 +31,24 @@ import type {
   LoadModelRequest,
   DisposeModelRequest,
   GenerateRequest,
-  InterruptRequest,
   GenerationStartedEvent,
   StreamDeltaEvent,
   GenerationCompleteEvent,
   GenerationInterruptedEvent,
+  InferenceChatMessage,
+  GenerationDefaults,
 } from '@/runtime/inference-types'
 
 import { models } from '@/config/models'
+import { LatestRequestTracker } from '@/runtime/latest-request'
+import { toWorkerSettings } from '@/runtime/generation-settings'
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/**
- * Hidden system prompt for all generations
- * Enforces concise, direct technical responses
- */
-const SYSTEM_PROMPT =
+const WARMUP_SYSTEM_PROMPT =
   'You are a concise local browser demo assistant. Answer directly, clearly, and compactly. Do not mention hidden reasoning. Prefer short technical responses.'
-
-/**
- * Generation defaults for all models
- */
-const GENERATION_DEFAULTS = {
-  do_sample: true,
-  temperature: 0.7,
-  top_p: 0.8,
-  top_k: 20,
-  repetition_penalty: 1.05,
-  max_new_tokens: 256,
-}
 
 /**
  * First dtype attempt - all q4 quantization
@@ -130,6 +120,8 @@ const modelState: ModelState = {
   stoppingCriteria: null,
   activeRequestId: null,
 }
+
+const loadRequestTracker = new LatestRequestTracker()
 
 // ============================================================================
 // Event Creators
@@ -374,12 +366,17 @@ async function loadModel(
   requestId: string,
   modelId: string
 ): Promise<void> {
+  loadRequestTracker.start(requestId)
+
   // Get model config
   const modelConfig = models[modelId]
   if (!modelConfig) {
-    self.postMessage(
-      createRuntimeErrorEvent(requestId, modelId, `Unknown model ID: ${modelId}`)
-    )
+    if (loadRequestTracker.isCurrent(requestId)) {
+      self.postMessage(
+        createRuntimeErrorEvent(requestId, modelId, `Unknown model ID: ${modelId}`)
+      )
+      loadRequestTracker.clear(requestId)
+    }
     return
   }
 
@@ -390,6 +387,10 @@ async function loadModel(
 
   // Create progress callback
   const progressCallback = (progress: ProgressInfo) => {
+    if (!loadRequestTracker.isCurrent(requestId)) {
+      return
+    }
+
     if (progress.status === 'progress' && progress.progress !== undefined) {
       self.postMessage(
         createLoadProgressEvent(
@@ -419,13 +420,22 @@ async function loadModel(
   try {
     processor = await AutoProcessor.from_pretrained(repoId)
     tokenizer = await AutoTokenizer.from_pretrained(repoId)
+
+     if (!loadRequestTracker.isCurrent(requestId)) {
+      return
+    }
     
     model = await Qwen3_5ForConditionalGeneration.from_pretrained(repoId, {
       dtype: dtypeAttempt1,
       device: 'webgpu',
       progress_callback: progressCallback,
     })
-  } catch (firstError) {
+  } catch {
+    if (!loadRequestTracker.isCurrent(requestId)) {
+      await disposeLoadedModel(model)
+      return
+    }
+
     // Emit progress about retry
     self.postMessage(
       createLoadProgressEvent(
@@ -447,91 +457,112 @@ async function loadModel(
       const errorMsg = secondError instanceof Error 
         ? secondError.message 
         : 'Unknown error during model loading'
-      self.postMessage(
-        createRuntimeErrorEvent(
-          requestId,
-          modelId,
-          `Model initialization failed: ${errorMsg}`
+      if (loadRequestTracker.isCurrent(requestId)) {
+        self.postMessage(
+          createRuntimeErrorEvent(
+            requestId,
+            modelId,
+            `Model initialization failed: ${errorMsg}`
+          )
         )
-      )
+        loadRequestTracker.clear(requestId)
+      }
       return
     }
   }
 
-  // Store model state
-  modelState.model = model
-  modelState.processor = processor
-  modelState.tokenizer = tokenizer
-  modelState.modelId = modelId
-  modelState.repoId = repoId
+  if (!loadRequestTracker.isCurrent(requestId)) {
+    await disposeLoadedModel(model)
+    return
+  }
 
   // Emit warming_started
   self.postMessage(createWarmingStartedEvent(requestId, modelId))
 
   // Run warmup (one-token generation)
   try {
-    await runWarmup()
+    await runWarmup(model, processor)
   } catch (warmupError) {
     const errorMsg = warmupError instanceof Error 
       ? warmupError.message 
       : 'Unknown error during warmup'
-    self.postMessage(
-      createRuntimeErrorEvent(
-        requestId,
-        modelId,
-        `Warmup failed: ${errorMsg}`
+    if (loadRequestTracker.isCurrent(requestId)) {
+      self.postMessage(
+        createRuntimeErrorEvent(
+          requestId,
+          modelId,
+          `Warmup failed: ${errorMsg}`
+        )
       )
-    )
-    // Clean up failed warmup
-    await disposeModel()
+      loadRequestTracker.clear(requestId)
+    }
+    await disposeLoadedModel(model)
     return
   }
 
+  if (!loadRequestTracker.isCurrent(requestId)) {
+    await disposeLoadedModel(model)
+    return
+  }
+
+  modelState.model = model
+  modelState.processor = processor
+  modelState.tokenizer = tokenizer
+  modelState.modelId = modelId
+  modelState.repoId = repoId
+
   // Emit model_ready
   self.postMessage(createModelReadyEvent(requestId, modelId))
+  loadRequestTracker.clear(requestId)
 }
 
 /**
  * Runs a minimal one-token warmup generation
  * This ensures the model is ready for actual generation
  */
-async function runWarmup(): Promise<void> {
-  if (!modelState.model || !modelState.processor) {
+async function runWarmup(
+  model: PreTrainedModel | null,
+  processor: Processor | null
+): Promise<void> {
+  if (!model || !processor) {
     throw new Error('Model or processor not initialized')
   }
 
   const warmupMessages = [
-    { role: 'system' as const, content: SYSTEM_PROMPT },
+    { role: 'system' as const, content: WARMUP_SYSTEM_PROMPT },
     { role: 'user' as const, content: 'Hi' },
   ]
 
-  const text = modelState.processor.apply_chat_template(warmupMessages, {
+  const text = processor.apply_chat_template(warmupMessages, {
     add_generation_prompt: true,
   })
 
-  const inputs = await modelState.processor(text)
+  const inputs = await processor(text)
 
-  await modelState.model.generate({
+  await model.generate({
     ...inputs,
     max_new_tokens: 1,
   })
+}
+
+async function disposeLoadedModel(model: PreTrainedModel | null): Promise<void> {
+  if (!model) {
+    return
+  }
+
+  try {
+    if (typeof model.dispose === 'function') {
+      await model.dispose()
+    }
+  } catch {
+  }
 }
 
 /**
  * Disposes the current model and clears state
  */
 async function disposeModel(): Promise<void> {
-  // Clear model reference to allow garbage collection
-  if (modelState.model) {
-    try {
-      // Call dispose if available
-      if (typeof modelState.model.dispose === 'function') {
-        await modelState.model.dispose()
-      }
-    } catch {
-      // Ignore disposal errors
-    }
-  }
+  await disposeLoadedModel(modelState.model)
 
   // Reset state
   modelState.model = null
@@ -541,6 +572,7 @@ async function disposeModel(): Promise<void> {
   modelState.repoId = null
   modelState.stoppingCriteria = null
   modelState.activeRequestId = null
+  loadRequestTracker.reset()
 }
 
 /**
@@ -549,7 +581,8 @@ async function disposeModel(): Promise<void> {
 async function generate(
   requestId: string,
   modelId: string,
-  prompt: string
+  messages: InferenceChatMessage[],
+  settings: GenerationDefaults
 ): Promise<void> {
   if (!modelState.model || !modelState.processor || !modelState.tokenizer) {
     self.postMessage(
@@ -564,11 +597,6 @@ async function generate(
   modelState.stoppingCriteria = stoppingCriteria
 
   self.postMessage(createGenerationStartedEvent(requestId, modelId))
-
-  const messages = [
-    { role: 'system' as const, content: SYSTEM_PROMPT },
-    { role: 'user' as const, content: prompt },
-  ]
 
   const text = modelState.processor.apply_chat_template(messages, {
     add_generation_prompt: true,
@@ -586,10 +614,27 @@ async function generate(
     },
   })
 
+  const modelConfig = models[modelId]
+  const modelDefaults = modelConfig?.generationDefaults ?? {
+    doSample: true,
+    temperature: 0.7,
+    topP: 0.8,
+    topK: 20,
+    repetitionPenalty: 1.05,
+    maxNewTokens: 256,
+  }
+
+  const mergedSettings: GenerationDefaults = {
+    ...modelDefaults,
+    ...settings,
+  }
+
+  const workerSettings = toWorkerSettings(mergedSettings)
+
   try {
     await modelState.model.generate({
       ...inputs,
-      ...GENERATION_DEFAULTS,
+      ...workerSettings,
       streamer,
       stopping_criteria: [stoppingCriteria] as StoppingCriteria[],
     })
@@ -617,7 +662,7 @@ async function generate(
 /**
  * Interrupts the current generation
  */
-function interrupt(requestId: string, modelId: string): void {
+function interrupt(): void {
   if (modelState.stoppingCriteria) {
     modelState.stoppingCriteria.interrupt()
   }
@@ -656,14 +701,13 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       }
 
       case 'generate': {
-        const { requestId, modelId, prompt } = event.data as GenerateRequest
-        await generate(requestId, modelId, prompt)
+        const { requestId, modelId, messages, settings } = event.data as GenerateRequest
+        await generate(requestId, modelId, messages, settings)
         break
       }
 
       case 'interrupt': {
-        const { requestId, modelId } = event.data as InterruptRequest
-        interrupt(requestId, modelId)
+        interrupt()
         break
       }
 

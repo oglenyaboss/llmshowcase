@@ -29,14 +29,13 @@ export class WorkerClient {
       return
     }
 
-    // Create worker using URL constructor for Next.js compatibility
-    // The worker file is resolved at runtime
-    const workerUrl = new URL(
-      '../workers/inference.worker.ts',
-      import.meta.url
+    this.worker = new Worker(
+      new URL('../workers/inference.worker.ts', import.meta.url),
+      {
+        type: 'module',
+        name: 'inference-runtime',
+      }
     )
-    
-    this.worker = new Worker(workerUrl, { type: 'module' })
     
     this.worker.onmessage = (event: MessageEvent<WorkerEvent>) => {
       this.onEvent(event.data)
@@ -45,7 +44,8 @@ export class WorkerClient {
     this.worker.onerror = (error: ErrorEvent) => {
       this.ready = false
       if (this.onError) {
-        this.onError(new Error(error.message))
+        const message = error.message || 'Failed to load inference worker'
+        this.onError(new Error(message))
       }
     }
 

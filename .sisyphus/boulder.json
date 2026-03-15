@@ -1,8 +1,7 @@
 {
-  "active_plan": "/Users/lenya/Projects/personal/llmshowcase/.sisyphus/plans/browser-native-qwen-showcase-mvp.md",
-  "started_at": "2026-03-14T04:42:00.000Z",
-  "session_ids": ["ses_3155957daffeCbiE1XO0gaid7f", "ses_3154ce3bdffezancD9v1nH3sXX"],
-  "plan_name": "browser-native-qwen-showcase-mvp",
-  "worktree_path": "/Users/lenya/Projects/personal/llmshowcase",
-  "stack_modification": "Next.js + Tailwind CSS (user requested, replacing Vite)"
+  "active_plan": "/Users/lenya/Projects/personal/llmshowcase/.sisyphus/plans/showcase-prod-polish.md",
+  "started_at": "2026-03-14T21:44:57.465Z",
+  "session_ids": ["ses_311b0be93ffe8YsRnSQZ7XsieV"],
+  "plan_name": "showcase-prod-polish",
+  "worktree_path": "/Users/lenya/Projects/personal/llmshowcase"
 }
