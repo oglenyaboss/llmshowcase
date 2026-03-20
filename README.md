@@ -1,53 +1,85 @@
 # LLM Showcase — Local-First WebGPU Chat
 
+[![CI](https://github.com/YOUR_USERNAME/llmshowcase/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/llmshowcase/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A browser-native Qwen showcase with WebGPU inference, persistent local history, adjustable generation controls, and an editorial production-ready interface.
+
+**[Live Demo](https://llmshowcase.vercel.app)** *(deploy your own — see below)*
 
 ## Features
 
-- Editorial showcase layout with browser-native chat workspace
-- Multi-chat sidebar with create, select, rename, and delete capabilities
-- Streaming responses with interrupt support
-- Persistent local history via IndexedDB
-- Editable system prompt and saved generation defaults
-- Adjustable inference settings (temperature, top-p, top-k, repetition penalty, max tokens)
-- Cursor-style context window gauge with approximate prompt-budget tracking
-- Browser-local WebGPU inference using Transformers.js & ONNX Runtime
-- Telemetry rail for runtime, capabilities, and memory heuristics
+- 🖥️ **Editorial showcase layout** with browser-native chat workspace
+- 💬 **Multi-chat sidebar** with create, select, rename, and delete capabilities
+- ⚡ **Streaming responses** with interrupt support
+- 💾 **Persistent local history** via IndexedDB
+- 🎛️ **Adjustable inference settings** (temperature, top-p, top-k, repetition penalty, max tokens)
+- 📊 **Context window gauge** with approximate prompt-budget tracking
+- 🧠 **Thinking mode** support for Qwen 2B and 4B models
+- 🔒 **Privacy-first** — all data stays local, no server calls
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/YOUR_USERNAME/llmshowcase.git
+cd llmshowcase
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in Chrome 113+ or Edge 113+.
+
+## Models
+
+| Model | Size | Tier | Thinking | Recommended For |
+|-------|------|------|----------|-----------------|
+| Qwen 3.5 0.8B | ~500MB | Stable | ❌ | Quick demos, weaker hardware |
+| Qwen 3.5 2B | ~1.5GB | Stable | ✅ | Better quality, mid-range GPUs |
+| Qwen 3.5 4B | ~2.5GB | Experimental | ✅ | High quality, dedicated GPUs |
 
 ## Browser Support
 
-- Chrome 113+ (recommended)
-- Edge 113+
-- Safari with WebGPU enabled (experimental)
+| Browser | Version | Status |
+|---------|---------|--------|
+| Chrome | 113+ | ✅ Recommended |
+| Edge | 113+ | ✅ Supported |
+| Safari | TP+ | ⚠️ Experimental (enable WebGPU) |
+| Firefox | — | ❌ Not supported (no WebGPU) |
 
 ## Privacy
 
 All data stays local. Your chats never leave your browser:
 
-- No server calls for inference
-- Chat history stored in IndexedDB locally
-- Model weights downloaded once and cached
-- Full privacy—no data leaves your device
+- ✅ No server calls for inference
+- ✅ Chat history stored in IndexedDB locally
+- ✅ Model weights downloaded once and cached
+- ✅ Full privacy—no data leaves your device
 
-## Showcase Entry Point
+## Documentation
 
-- `/` — canonical production showcase homepage
+- [Architecture Overview](./docs/architecture.md) — System design and data flow
+- [Contributing Guide](./CONTRIBUTING.md) — How to contribute
+- [Changelog](./CHANGELOG.md) — Version history
 
-## Development
+## Scripts
 
-```bash
-npm install
-npm run dev     # Development server
-npm run build   # Production build
-npm run preview # Preview production build
-```
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start development server |
+| `npm run build` | Production build |
+| `npm run start` | Start production server |
+| `npm run lint` | Run ESLint |
+| `npm run test` | Run unit tests (Vitest) |
+| `npm run test:e2e` | Run E2E tests (Playwright) |
 
-## Testing
+## Deploy Your Own
 
-```bash
-npm run test        # Unit tests with Vitest
-npm run test:e2e    # E2E tests with Playwright (mock WebGPU runtime)
-```
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/llmshowcase)
 
 ## Limitations
 
@@ -57,18 +89,20 @@ npm run test:e2e    # E2E tests with Playwright (mock WebGPU runtime)
 - Model weights downloaded on first load (may take time)
 - 4B model experimental—may fail on integrated GPUs
 
-## Production Notes
-
-- Legacy numbered prototype routes have been removed in favor of a single canonical homepage
-- Playwright E2E tests run against a mock runtime using `NEXT_PUBLIC_E2E_MOCK_RUNTIME=1`
-- Metadata is configured for a public showcase landing page
-
 ## Screenshots
 
 ![Chat Workspace](./public/readme/chat-workspace.png)
 ![Settings Rail](./public/readme/settings-rail.png)
 ![Chat Sidebar](./public/readme/chat-sidebar.png)
 
+## Tech Stack
+
+- **Framework:** Next.js 16, React 19
+- **Inference:** Transformers.js, ONNX Runtime Web
+- **Styling:** Tailwind CSS
+- **Testing:** Vitest, Playwright
+- **Persistence:** IndexedDB
+
 ## License
 
-MIT
+[MIT](./LICENSE)
