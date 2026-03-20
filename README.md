@@ -5,7 +5,7 @@
 
 A browser-native Qwen showcase with WebGPU inference, persistent local history, adjustable generation controls, and an editorial production-ready interface.
 
-**[Live Demo](https://llmshowcase.vercel.app)** *(coming soon — deploy your own below)*
+**[Live Demo](https://llmshowcase.vercel.app/)**
 
 ## Origin Story
 
