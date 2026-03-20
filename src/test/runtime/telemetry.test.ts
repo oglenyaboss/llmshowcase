@@ -3,6 +3,7 @@ import {
   createDefaultTelemetry,
   calculateTokensPerSecond,
   updateTelemetryFromProbe,
+  updateTelemetryModel,
   updateTelemetryPhase,
   updateTelemetryFromGeneration,
 } from '@/runtime/telemetry'
@@ -13,7 +14,9 @@ const testModel: ModelConfig = {
   label: 'Qwen 3.5 0.8B',
   repoId: 'onnx-community/Qwen3.5-0.8B-ONNX',
   tier: 'stable',
+  supportsThinking: false,
   description: 'Test model',
+  contextWindowTokens: 262_144,
   memoryNote: '~1-2 GB VRAM recommended',
   recommendedFor: 'Testing',
   dtype: {
@@ -23,11 +26,14 @@ const testModel: ModelConfig = {
   },
   generationDefaults: {
     doSample: true,
+    enableThinking: false,
     temperature: 0.7,
     topP: 0.8,
     topK: 20,
-    repetitionPenalty: 1.05,
-    maxNewTokens: 256,
+    minP: 0,
+    presencePenalty: 1.5,
+    repetitionPenalty: 1,
+    maxNewTokens: 2000,
   },
 }
 
@@ -244,6 +250,47 @@ describe('updateTelemetryPhase', () => {
       const updated = updateTelemetryPhase(baseTelemetry, phase)
       expect(updated.runtimePhase).toBe(phase)
     })
+  })
+})
+
+describe('updateTelemetryModel', () => {
+  const baseTelemetry = createDefaultTelemetry(testModel)
+
+  it('updates model metadata while preserving device capabilities', () => {
+    const telemetry: TelemetrySnapshot = {
+      ...baseTelemetry,
+      shaderF16Support: true,
+      maxBufferSize: '4 GB',
+      maxStorageBufferBindingSize: '1 GB',
+      runtimePhase: 'ready',
+      warmState: 'warm',
+      lastError: 'Previous error',
+    }
+
+    const nextModel: ModelConfig = {
+      ...testModel,
+      id: 'qwen-2b',
+      label: 'Qwen 3.5 2B',
+      repoId: 'onnx-community/Qwen3.5-2B-ONNX',
+      memoryNote: '~3-4 GB VRAM recommended',
+    }
+
+    const updated = updateTelemetryModel(telemetry, nextModel, {
+      phase: 'loading_model',
+      warmState: 'cold',
+      resetPerformance: true,
+      clearError: true,
+    })
+
+    expect(updated.selectedModelLabel).toBe('Qwen 3.5 2B')
+    expect(updated.selectedModelRepoId).toBe('onnx-community/Qwen3.5-2B-ONNX')
+    expect(updated.heuristicMemoryNote).toBe('~3-4 GB VRAM recommended')
+    expect(updated.shaderF16Support).toBe(true)
+    expect(updated.maxBufferSize).toBe('4 GB')
+    expect(updated.runtimePhase).toBe('loading_model')
+    expect(updated.warmState).toBe('cold')
+    expect(updated.approxTokenCount).toBe(0)
+    expect(updated.lastError).toBeNull()
   })
 })
 

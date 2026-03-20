@@ -5,8 +5,15 @@ import type {
   CapabilityProbeResult,
   GenerationDefaults,
 } from '@/runtime/inference-types'
-import { createDefaultTelemetry, updateTelemetryFromProbe } from '@/runtime/telemetry'
+import {
+  createDefaultTelemetry,
+  updateTelemetryFromGeneration,
+  updateTelemetryFromProbe,
+  updateTelemetryModel,
+  updateTelemetryPhase,
+} from '@/runtime/telemetry'
 import { getModelById } from '@/config/models'
+import { getRecentContextMessages } from './context-window'
 import type {
   ChatSession,
   ChatMessage,
@@ -15,6 +22,41 @@ import type {
   ActiveGenerationInput,
 } from './showcase-types'
 import { DEFAULT_SYSTEM_PROMPT } from './showcase-types'
+
+function normalizeInferenceSettings(
+  modelId: string,
+  settings: Partial<GenerationDefaults> | undefined
+): GenerationDefaults {
+  const modelConfig = getModelById(modelId)
+  const modelDefaults = modelConfig?.generationDefaults ?? getDefaultNewChatDefaults().inferenceSettings
+  const supportsThinking = modelConfig?.supportsThinking ?? true
+
+  const normalized = {
+    ...modelDefaults,
+    ...settings,
+  }
+
+  return supportsThinking
+    ? normalized
+    : {
+        ...normalized,
+        enableThinking: false,
+      }
+}
+
+function normalizeNewChatDefaults(defaults: NewChatDefaults): NewChatDefaults {
+  return {
+    ...defaults,
+    inferenceSettings: normalizeInferenceSettings(defaults.modelId, defaults.inferenceSettings),
+  }
+}
+
+function normalizeChatSession(chat: ChatSession): ChatSession {
+  return {
+    ...chat,
+    inferenceSettings: normalizeInferenceSettings(chat.modelId, chat.inferenceSettings),
+  }
+}
 
 /**
  * Showcase State Shape
@@ -103,13 +145,7 @@ function buildGenerationInput(
   chat: ChatSession,
   newUserMessageContent: string
 ): ActiveGenerationInput {
-  // Get last 8 finalized user/assistant pairs (16 messages max)
-  const finalizedMessages = chat.messages.filter(
-    (m) => m.role === 'user' || (m.role === 'assistant' && m.status)
-  )
-
-  // Take last 16 finalized messages (8 pairs)
-  const recentFinalized = finalizedMessages.slice(-16)
+  const recentFinalized = getRecentContextMessages(chat.messages)
 
   // Create the new user message
   const newUserMessage: ChatMessage = {
@@ -133,15 +169,18 @@ export function getDefaultNewChatDefaults(): NewChatDefaults {
   return {
     modelId: 'qwen-0.8b',
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    inferenceSettings: model ? { ...model.generationDefaults } : {
-      doSample: true,
-      temperature: 0.7,
-      topP: 0.8,
-      topK: 20,
-      repetitionPenalty: 1.05,
-      maxNewTokens: 256,
-    },
-  }
+      inferenceSettings: model ? { ...model.generationDefaults } : {
+        doSample: true,
+        enableThinking: false,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+        minP: 0,
+        presencePenalty: 1.5,
+        repetitionPenalty: 1,
+        maxNewTokens: 2000,
+      },
+    }
 }
 
 /**
@@ -208,6 +247,28 @@ function getActiveChatModelId(state: ShowcaseState): string {
   return chat?.modelId ?? state.newChatDefaults.modelId
 }
 
+function createTelemetryForModel(
+  telemetry: TelemetrySnapshot,
+  modelId: string,
+  options: {
+    phase?: RuntimePhase
+    warmState?: WarmState
+    resetPerformance?: boolean
+    clearError?: boolean
+  } = {}
+): TelemetrySnapshot {
+  const model = getModelById(modelId)
+  if (!model) {
+    return updateTelemetryPhase(
+      telemetry,
+      options.phase ?? telemetry.runtimePhase,
+      options.warmState
+    )
+  }
+
+  return updateTelemetryModel(telemetry, model, options)
+}
+
 /**
  * Reducer for showcase state transitions
  */
@@ -217,39 +278,65 @@ export function showcaseReducer(
 ): ShowcaseState {
   switch (action.type) {
     case 'HYDRATE_SUCCESS': {
-      const { activeChatId, newChatDefaults, chats } = action.payload
+      const normalizedDefaults = normalizeNewChatDefaults(action.payload.newChatDefaults)
+      const chats = action.payload.chats.map(normalizeChatSession)
+      const activeChatId = action.payload.activeChatId
       // Ensure at least one chat exists
       if (chats.length === 0) {
-        const freshChat = createFreshChat(newChatDefaults)
+        const freshChat = createFreshChat(normalizedDefaults)
         return {
           ...state,
           activeChatId: freshChat.id,
-          newChatDefaults,
+          newChatDefaults: normalizedDefaults,
           chats: [freshChat],
           hydrationStatus: 'ready',
+          telemetry: createTelemetryForModel(state.telemetry, freshChat.modelId, {
+            phase: state.runtimePhase,
+            warmState: state.warmState,
+            resetPerformance: true,
+            clearError: true,
+          }),
         }
       }
       // Ensure activeChatId is valid
       const validActiveId = chats.some((c) => c.id === activeChatId)
         ? activeChatId
         : chats[0].id
+      const hydratedChat = chats.find((chat) => chat.id === validActiveId) ?? chats[0]
       return {
         ...state,
         activeChatId: validActiveId,
-        newChatDefaults,
+        newChatDefaults: normalizedDefaults,
         chats,
         hydrationStatus: 'ready',
+        telemetry: createTelemetryForModel(state.telemetry, hydratedChat.modelId, {
+          phase: state.runtimePhase,
+          warmState: state.warmState,
+          resetPerformance: true,
+          clearError: true,
+        }),
       }
     }
 
     case 'HYDRATE_FAILURE': {
-      const { activeChatId, newChatDefaults, chats } = action.payload
+      const normalizedDefaults = normalizeNewChatDefaults(action.payload.newChatDefaults)
+      const chats = action.payload.chats.map(normalizeChatSession)
+      const activeChatId = action.payload.activeChatId
+      const recoveredChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0]
       return {
         ...state,
         activeChatId,
-        newChatDefaults,
+        newChatDefaults: normalizedDefaults,
         chats,
         hydrationStatus: 'ready',
+        telemetry: recoveredChat
+          ? createTelemetryForModel(state.telemetry, recoveredChat.modelId, {
+              phase: state.runtimePhase,
+              warmState: state.warmState,
+              resetPerformance: true,
+              clearError: true,
+            })
+          : state.telemetry,
       }
     }
 
@@ -275,10 +362,19 @@ export function showcaseReducer(
       if (!state.chats.some((c) => c.id === chatId)) return state
       const chat = state.chats.find((c) => c.id === chatId)
       const model = chat ? getModelById(chat.modelId) : null
+      const previousModelId = getActiveChatModelId(state)
+      const selectedModelChanged = chat?.modelId !== previousModelId
       return {
         ...state,
         activeChatId: chatId,
-        telemetry: model ? createDefaultTelemetry(model) : state.telemetry,
+        telemetry: model
+          ? createTelemetryForModel(state.telemetry, model.id, {
+              phase: selectedModelChanged ? 'idle' : state.runtimePhase,
+              warmState: selectedModelChanged ? 'cold' : state.warmState,
+              resetPerformance: true,
+              clearError: true,
+            })
+          : state.telemetry,
         statusMessage: model
           ? `Switched to chat. Model: ${model.label}.`
           : state.statusMessage,
@@ -347,12 +443,48 @@ export function showcaseReducer(
       const model = getModelById(modelId)
       if (!model) return state
 
-      return updateActiveChat(state, (chat) => ({
+      const previousModelId = getActiveChatModelId(state)
+      const selectedModelChanged = previousModelId !== modelId
+
+      const nextState = updateActiveChat(state, (chat) => ({
         ...chat,
         modelId,
         inferenceSettings: { ...model.generationDefaults },
         updatedAt: Date.now(),
       }))
+
+      if (selectedModelChanged) {
+        return {
+          ...nextState,
+          runtimePhase: 'idle',
+          warmState: 'cold',
+          tokenCount: 0,
+          generationStartedAt: null,
+          loadStartedAt: null,
+          loadProgress: 0,
+          loadStatus: '',
+          currentError: null,
+          activeAssistantMessageId: null,
+          activeGenerationInput: null,
+          statusMessage: `${model.label} selected. Ready to load.`,
+          telemetry: createTelemetryForModel(nextState.telemetry, model.id, {
+            phase: 'idle',
+            warmState: 'cold',
+            resetPerformance: true,
+            clearError: true,
+          }),
+        }
+      }
+
+      return {
+        ...nextState,
+        telemetry: createTelemetryForModel(nextState.telemetry, model.id, {
+          phase: state.runtimePhase,
+          warmState: state.warmState,
+          resetPerformance: false,
+          clearError: state.runtimePhase === 'error',
+        }),
+      }
     }
 
     case 'SET_ACTIVE_CHAT_SYSTEM_PROMPT': {
@@ -366,17 +498,23 @@ export function showcaseReducer(
     case 'UPDATE_ACTIVE_CHAT_SETTINGS': {
       return updateActiveChat(state, (chat) => ({
         ...chat,
-        inferenceSettings: { ...chat.inferenceSettings, ...action.payload },
+        inferenceSettings: normalizeInferenceSettings(chat.modelId, {
+          ...chat.inferenceSettings,
+          ...action.payload,
+        }),
         updatedAt: Date.now(),
       }))
     }
 
     case 'RESET_ACTIVE_CHAT_SETTINGS_TO_DEFAULTS': {
       return updateActiveChat(state, (chat) => {
-        const defaults = state.newChatDefaults
+        const modelDefaults = getModelById(chat.modelId)?.generationDefaults
         return {
           ...chat,
-          inferenceSettings: { ...defaults.inferenceSettings },
+          inferenceSettings: normalizeInferenceSettings(
+            chat.modelId,
+            modelDefaults ?? state.newChatDefaults.inferenceSettings
+          ),
           updatedAt: Date.now(),
         }
       })
@@ -451,6 +589,7 @@ export function showcaseReducer(
         generationStartedAt: now,
         statusMessage: 'Generating...',
         currentError: null,
+        telemetry: updateTelemetryPhase(state.telemetry, 'generating', state.warmState),
       }
     }
 
@@ -485,8 +624,6 @@ export function showcaseReducer(
       const durationMs = state.generationStartedAt
         ? Date.now() - state.generationStartedAt
         : action.payload.durationMs
-      const tokensPerSecond =
-        durationMs > 0 ? (tokenCount / durationMs) * 1000 : null
 
       const index = findActiveChatIndex(state)
       if (index === -1) return state
@@ -507,12 +644,11 @@ export function showcaseReducer(
         chats: updatedChats,
         runtimePhase: 'ready',
         tokenCount: state.tokenCount + tokenCount,
-        telemetry: {
-          ...state.telemetry,
-          generationDurationMs: durationMs,
-          approxTokenCount: state.telemetry.approxTokenCount + tokenCount,
-          approxTokensPerSecond: tokensPerSecond,
-        },
+        telemetry: updateTelemetryPhase(
+          updateTelemetryFromGeneration(state.telemetry, tokenCount, durationMs),
+          'ready',
+          'warm'
+        ),
         generationStartedAt: null,
         activeAssistantMessageId: null,
         activeGenerationInput: null,
@@ -546,6 +682,7 @@ export function showcaseReducer(
         activeAssistantMessageId: null,
         activeGenerationInput: null,
         statusMessage: 'Generation interrupted.',
+        telemetry: updateTelemetryPhase(state.telemetry, 'ready', state.warmState),
       }
     }
 
@@ -555,6 +692,7 @@ export function showcaseReducer(
         runtimePhase: 'probing',
         statusMessage: 'Probing WebGPU capabilities...',
         currentError: null,
+        telemetry: updateTelemetryPhase(state.telemetry, 'probing', state.warmState),
       }
     }
 
@@ -579,6 +717,10 @@ export function showcaseReducer(
         runtimePhase: 'error',
         statusMessage: 'Failed to probe WebGPU capabilities',
         currentError: action.payload,
+        telemetry: {
+          ...updateTelemetryPhase(state.telemetry, 'error', state.warmState),
+          lastError: action.payload,
+        },
       }
     }
 
@@ -591,6 +733,13 @@ export function showcaseReducer(
         loadStartedAt: Date.now(),
         statusMessage: `Loading ${getModelById(action.payload.modelId)?.label ?? 'model'}...`,
         currentError: null,
+        warmState: 'cold',
+        telemetry: createTelemetryForModel(state.telemetry, action.payload.modelId, {
+          phase: 'loading_model',
+          warmState: 'cold',
+          resetPerformance: true,
+          clearError: true,
+        }),
       }
     }
 
@@ -611,7 +760,11 @@ export function showcaseReducer(
         loadProgress: 100,
         loadStatus: 'Ready',
         telemetry: {
-          ...state.telemetry,
+          ...createTelemetryForModel(state.telemetry, action.payload.modelId, {
+            phase: 'ready',
+            warmState: 'warm',
+            clearError: true,
+          }),
           loadDurationMs: action.payload.loadDurationMs,
           warmupDurationMs: action.payload.warmupDurationMs,
         },
@@ -624,6 +777,8 @@ export function showcaseReducer(
         ...state,
         runtimePhase: 'warming_model',
         loadStatus: 'Warming up...',
+        warmState: 'cold',
+        telemetry: updateTelemetryPhase(state.telemetry, 'warming_model', 'cold'),
       }
     }
 
@@ -632,6 +787,7 @@ export function showcaseReducer(
         ...state,
         warmState: 'warm',
         loadStatus: 'Warm',
+        telemetry: updateTelemetryPhase(state.telemetry, state.runtimePhase, 'warm'),
       }
     }
 
@@ -641,12 +797,14 @@ export function showcaseReducer(
           ...state,
           runtimePhase: 'stopping',
           statusMessage: 'Stopping generation...',
+          telemetry: updateTelemetryPhase(state.telemetry, 'stopping', state.warmState),
         }
       }
       return state
     }
 
     case 'RUNTIME_ERROR': {
+      const activeModelId = getActiveChatModelId(state)
       return {
         ...state,
         runtimePhase: 'error',
@@ -656,7 +814,10 @@ export function showcaseReducer(
         activeAssistantMessageId: null,
         activeGenerationInput: null,
         telemetry: {
-          ...state.telemetry,
+          ...createTelemetryForModel(state.telemetry, activeModelId, {
+            phase: 'error',
+            warmState: state.warmState,
+          }),
           lastError: action.payload.error,
         },
       }
@@ -688,8 +849,13 @@ export function showcaseReducer(
         activeAssistantMessageId: null,
         activeGenerationInput: null,
         telemetry: currentModel
-          ? createDefaultTelemetry(currentModel)
-          : state.telemetry,
+          ? createTelemetryForModel(state.telemetry, currentModel.id, {
+              phase: 'idle',
+              warmState: 'cold',
+              resetPerformance: true,
+              clearError: true,
+            })
+          : updateTelemetryPhase(state.telemetry, 'idle', 'cold'),
         statusMessage: 'Model unloaded. Ready to load.',
       }
     }
@@ -707,7 +873,7 @@ export function showcaseReducer(
           ? 'Error cleared. Model ready.'
           : 'Error cleared. Ready to load.',
         telemetry: {
-          ...state.telemetry,
+          ...updateTelemetryPhase(state.telemetry, newPhase, state.warmState),
           lastError: null,
         },
       }

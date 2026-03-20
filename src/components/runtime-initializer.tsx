@@ -63,7 +63,7 @@ export function RuntimeInitializer() {
     })
   }, [dispatch])
 
-  const dispatchGenerationInterrupted = useCallback((_: string, _tokenCount: number, _durationMs: number) => {
+  const dispatchGenerationInterrupted = useCallback(() => {
     dispatch({ type: 'GENERATION_INTERRUPTED' })
   }, [dispatch])
 

@@ -15,7 +15,11 @@ import type { ModelManagerCallbacks } from './model-manager'
 /**
  * Canned response for mock generation
  */
-const CANNED_RESPONSE = 'This is a simulated response from the mock model for testing purposes.'
+const THINKING_RESPONSE =
+  '<think>Inspecting the request, choosing a concise structure, and preparing a final answer for the local showcase.</think>This is a simulated response from the mock model for testing purposes. It keeps streaming long enough to exercise progress, completion, and interruption flows in end-to-end tests.'
+
+const DIRECT_RESPONSE =
+  'This is a simulated response from the mock model for testing purposes. It keeps streaming long enough to exercise progress, completion, and interruption flows in end-to-end tests.'
 
 /**
  * Token delay in milliseconds for simulating streaming
@@ -135,6 +139,9 @@ export class MockModelManager {
       throw new Error('Manager disposed')
     }
 
+    void _messages
+    void _settings
+
     if (!this.activeModelId || this.activeModelId !== modelId) {
       return {
         success: false,
@@ -151,7 +158,8 @@ export class MockModelManager {
     const startTime = Date.now()
     let output = ''
 
-    const tokens = CANNED_RESPONSE.split(' ')
+    const response = _settings.enableThinking ? THINKING_RESPONSE : DIRECT_RESPONSE
+    const tokens = response.split(' ')
 
     try {
       for (let i = 0; i < tokens.length; i++) {

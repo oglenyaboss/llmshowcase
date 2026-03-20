@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@/state/showcase-types'
+import { getRecentContextMessages } from '@/state/context-window'
 import type { InferenceChatMessage } from './inference-types'
 
 export function buildInferenceMessages(
@@ -13,11 +14,7 @@ export function buildInferenceMessages(
     content: systemPrompt,
   })
 
-  const finalizedMessages = chatMessages.filter(
-    (m) => m.role === 'user' || (m.role === 'assistant' && m.status !== undefined)
-  )
-
-  const recentFinalized = finalizedMessages.slice(-16)
+  const recentFinalized = getRecentContextMessages(chatMessages)
 
   for (const msg of recentFinalized) {
     messages.push({

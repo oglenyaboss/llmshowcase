@@ -79,6 +79,42 @@ export function updateTelemetryPhase(
   }
 }
 
+interface UpdateTelemetryModelOptions {
+  resetPerformance?: boolean
+  phase?: RuntimePhase
+  warmState?: WarmState
+  clearError?: boolean
+}
+
+export function updateTelemetryModel(
+  telemetry: TelemetrySnapshot,
+  model: ModelConfig,
+  options: UpdateTelemetryModelOptions = {}
+): TelemetrySnapshot {
+  const {
+    resetPerformance = false,
+    phase = telemetry.runtimePhase,
+    warmState = telemetry.warmState,
+    clearError = false,
+  } = options
+
+  return {
+    ...telemetry,
+    selectedModelLabel: model.label,
+    selectedModelRepoId: model.repoId,
+    supportTier: model.tier,
+    heuristicMemoryNote: model.memoryNote,
+    runtimePhase: phase,
+    warmState,
+    loadDurationMs: resetPerformance ? null : telemetry.loadDurationMs,
+    warmupDurationMs: resetPerformance ? null : telemetry.warmupDurationMs,
+    generationDurationMs: resetPerformance ? null : telemetry.generationDurationMs,
+    approxTokenCount: resetPerformance ? 0 : telemetry.approxTokenCount,
+    approxTokensPerSecond: resetPerformance ? null : telemetry.approxTokensPerSecond,
+    lastError: clearError ? null : telemetry.lastError,
+  }
+}
+
 /**
  * Update telemetry with generation results
  */

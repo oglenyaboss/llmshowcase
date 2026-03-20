@@ -40,15 +40,16 @@ import type {
 } from '@/runtime/inference-types'
 
 import { models } from '@/config/models'
+import { toChatTemplateOptions } from '@/runtime/generation-settings'
 import { LatestRequestTracker } from '@/runtime/latest-request'
 import { toWorkerSettings } from '@/runtime/generation-settings'
+import { DEFAULT_SYSTEM_PROMPT } from '@/state/showcase-types'
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const WARMUP_SYSTEM_PROMPT =
-  'You are a concise local browser demo assistant. Answer directly, clearly, and compactly. Do not mention hidden reasoning. Prefer short technical responses.'
+const WARMUP_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
 
 /**
  * First dtype attempt - all q4 quantization
@@ -534,7 +535,10 @@ async function runWarmup(
   ]
 
   const text = processor.apply_chat_template(warmupMessages, {
-    add_generation_prompt: true,
+    ...toChatTemplateOptions({
+      ...models['qwen-0.8b'].generationDefaults,
+      maxNewTokens: 1,
+    }),
   })
 
   const inputs = await processor(text)
@@ -598,36 +602,39 @@ async function generate(
 
   self.postMessage(createGenerationStartedEvent(requestId, modelId))
 
-  const text = modelState.processor.apply_chat_template(messages, {
-    add_generation_prompt: true,
-  })
-
-  const inputs = await modelState.processor(text)
-
-  const streamer = new TextStreamer(modelState.tokenizer, {
-    skip_prompt: true,
-    skip_special_tokens: true,
-    callback_function: (token: string) => {
-      if (modelState.activeRequestId === requestId) {
-        self.postMessage(createStreamDeltaEvent(requestId, modelId, token))
-      }
-    },
-  })
-
   const modelConfig = models[modelId]
   const modelDefaults = modelConfig?.generationDefaults ?? {
     doSample: true,
+    enableThinking: false,
     temperature: 0.7,
     topP: 0.8,
     topK: 20,
-    repetitionPenalty: 1.05,
-    maxNewTokens: 256,
+    minP: 0,
+    presencePenalty: 1.5,
+    repetitionPenalty: 1,
+    maxNewTokens: 2000,
   }
 
   const mergedSettings: GenerationDefaults = {
     ...modelDefaults,
     ...settings,
   }
+
+  const text = modelState.processor.apply_chat_template(messages, {
+    ...toChatTemplateOptions(mergedSettings),
+  })
+
+  const inputs = await modelState.processor(text)
+
+  const streamer = new TextStreamer(modelState.tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: !mergedSettings.enableThinking,
+    callback_function: (token: string) => {
+      if (modelState.activeRequestId === requestId) {
+        self.postMessage(createStreamDeltaEvent(requestId, modelId, token))
+      }
+    },
+  })
 
   const workerSettings = toWorkerSettings(mergedSettings)
 

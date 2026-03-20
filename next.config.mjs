@@ -8,6 +8,7 @@ const transformersWebEntry = path.join(path.dirname(transformersEntry), 'transfo
 
 const nextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   env: {
     NEXT_PUBLIC_E2E_MOCK_RUNTIME: process.env.NEXT_PUBLIC_E2E_MOCK_RUNTIME || '0',
   },

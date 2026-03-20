@@ -8,14 +8,31 @@ import type { ModelConfig } from '@/runtime/inference-types'
 /**
  * Default generation parameters for all models
  */
-const generationDefaults = {
+const directGenerationDefaults = {
   doSample: true,
+  enableThinking: false,
   temperature: 0.7,
   topP: 0.8,
   topK: 20,
-  repetitionPenalty: 1.05,
-  maxNewTokens: 256,
+  minP: 0,
+  presencePenalty: 1.5,
+  repetitionPenalty: 1,
+  maxNewTokens: 2000,
 }
+
+const thinkingGenerationDefaults = {
+  doSample: true,
+  enableThinking: true,
+  temperature: 1,
+  topP: 0.95,
+  topK: 20,
+  minP: 0,
+  presencePenalty: 1.5,
+  repetitionPenalty: 1,
+  maxNewTokens: 2000,
+}
+
+const nativeContextWindowTokens = 262_144
 
 /**
  * Default dtype configuration (q4 quantization)
@@ -34,12 +51,14 @@ const qwen08b: ModelConfig = {
   label: 'Qwen 3.5 0.8B',
   repoId: 'onnx-community/Qwen3.5-0.8B-ONNX',
   tier: 'stable',
+  supportsThinking: false,
   description:
     'Fastest path. Best chance of working on modern integrated GPUs and Apple Silicon.',
+  contextWindowTokens: nativeContextWindowTokens,
   memoryNote: '~1-2 GB VRAM recommended',
   recommendedFor: 'Quick demos, weaker hardware, first-time testing',
   dtype: { ...defaultDtype },
-  generationDefaults: { ...generationDefaults },
+  generationDefaults: { ...directGenerationDefaults },
 }
 
 /**
@@ -50,12 +69,14 @@ const qwen2b: ModelConfig = {
   label: 'Qwen 3.5 2B',
   repoId: 'onnx-community/Qwen3.5-2B-ONNX',
   tier: 'stable',
+  supportsThinking: true,
   description:
     'Balanced path. Better output quality, higher load time and memory pressure.',
+  contextWindowTokens: nativeContextWindowTokens,
   memoryNote: '~3-4 GB VRAM recommended',
   recommendedFor: 'Better quality output, mid-range GPUs',
   dtype: { ...defaultDtype },
-  generationDefaults: { ...generationDefaults },
+  generationDefaults: { ...thinkingGenerationDefaults },
 }
 
 /**
@@ -66,14 +87,16 @@ const qwen4b: ModelConfig = {
   label: 'Qwen 3.5 4B',
   repoId: 'onnx-community/Qwen3.5-4B-ONNX',
   tier: 'experimental',
+  supportsThinking: true,
   description:
     'Experimental. High failure/stall risk on integrated GPUs and weaker laptops.',
   warning:
     'Qwen 3.5 4B is experimental in-browser and may fail or stall on integrated GPUs.',
+  contextWindowTokens: nativeContextWindowTokens,
   memoryNote: '~5-6 GB VRAM recommended',
   recommendedFor: 'High-quality output, dedicated GPUs only',
   dtype: { ...defaultDtype },
-  generationDefaults: { ...generationDefaults },
+  generationDefaults: { ...thinkingGenerationDefaults },
 }
 
 /**

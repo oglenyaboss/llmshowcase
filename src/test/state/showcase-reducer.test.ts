@@ -18,13 +18,7 @@ import {
   selectActiveChatTitle,
   selectActiveChatSystemPrompt,
   selectActiveChatInferenceSettings,
-  selectActiveChatMessages,
   selectNewChatDefaults,
-  selectIsLastAssistantInterrupted,
-  selectLastAssistantMessage,
-  selectIsHydrated,
-  selectIsBooting,
-  selectIsBusy,
 } from '@/state/showcase-selectors'
 import type { CapabilityProbeResult } from '@/runtime/inference-types'
 import { DEFAULT_SYSTEM_PROMPT } from '@/state/showcase-types'
@@ -63,6 +57,8 @@ describe('showcase-reducer', () => {
       const defaults = selectNewChatDefaults(initialShowcaseState)
       expect(defaults.modelId).toBe('qwen-0.8b')
       expect(defaults.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT)
+      expect(defaults.inferenceSettings.enableThinking).toBe(false)
+      expect(defaults.inferenceSettings.maxNewTokens).toBe(2000)
     })
   })
 
@@ -135,6 +131,46 @@ describe('showcase-reducer', () => {
       })
 
       expect(state.activeChatId).toBe('chat-1')
+    })
+
+    it('normalizes legacy persisted inference settings', () => {
+      const defaults = getDefaultNewChatDefaults()
+      const chat = createFreshChat(defaults, 'chat-1')
+      chat.inferenceSettings = {
+        doSample: true,
+        enableThinking: false,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+        repetitionPenalty: 1,
+        maxNewTokens: 256,
+      } as ShowcaseState['newChatDefaults']['inferenceSettings']
+
+      const state = showcaseReducer(initialShowcaseState, {
+        type: 'HYDRATE_SUCCESS',
+        payload: {
+          activeChatId: 'chat-1',
+          newChatDefaults: {
+            ...defaults,
+            inferenceSettings: {
+              doSample: true,
+              enableThinking: false,
+              temperature: 0.7,
+              topP: 0.8,
+              topK: 20,
+              repetitionPenalty: 1,
+              maxNewTokens: 256,
+            } as ShowcaseState['newChatDefaults']['inferenceSettings'],
+          },
+          chats: [chat],
+        },
+      })
+
+      expect(state.newChatDefaults.inferenceSettings.minP).toBe(0)
+      expect(state.newChatDefaults.inferenceSettings.presencePenalty).toBe(1.5)
+      expect(state.chats[0].inferenceSettings.minP).toBe(0)
+      expect(state.chats[0].inferenceSettings.presencePenalty).toBe(1.5)
+      expect(state.chats[0].inferenceSettings.enableThinking).toBe(false)
     })
   })
 
@@ -285,20 +321,36 @@ describe('showcase-reducer', () => {
       expect(settings.temperature).toBe(0.5)
       expect(settings.maxNewTokens).toBe(512)
     })
+
+    it('keeps thinking disabled for unsupported models', () => {
+      const hydratedState = createHydratedState()
+      const state = showcaseReducer(hydratedState, {
+        type: 'UPDATE_ACTIVE_CHAT_SETTINGS',
+        payload: { enableThinking: true },
+      })
+
+      expect(selectActiveChatInferenceSettings(state).enableThinking).toBe(false)
+    })
   })
 
   describe('RESET_ACTIVE_CHAT_SETTINGS_TO_DEFAULTS', () => {
-    it('resets settings to new chat defaults', () => {
+    it('resets settings to the active model defaults', () => {
       const hydratedState = createHydratedState()
       let state = showcaseReducer(hydratedState, {
+        type: 'SET_ACTIVE_CHAT_MODEL',
+        payload: 'qwen-2b',
+      })
+      state = showcaseReducer(state, {
         type: 'UPDATE_ACTIVE_CHAT_SETTINGS',
-        payload: { temperature: 0.9 },
+        payload: { temperature: 0.9, enableThinking: false, maxNewTokens: 512 },
       })
       
       state = showcaseReducer(state, { type: 'RESET_ACTIVE_CHAT_SETTINGS_TO_DEFAULTS' })
 
       const settings = selectActiveChatInferenceSettings(state)
-      expect(settings.temperature).toBe(0.7)
+      expect(settings.temperature).toBe(1)
+      expect(settings.enableThinking).toBe(true)
+      expect(settings.maxNewTokens).toBe(2000)
     })
   })
 
@@ -395,6 +447,11 @@ describe('showcase-reducer', () => {
         payload: 'qwen-2b',
       })
       expect(selectActiveChatModelId(state)).toBe('qwen-2b')
+      expect(state.runtimePhase).toBe('idle')
+      expect(state.warmState).toBe('cold')
+      expect(state.telemetry.selectedModelLabel).toBe('Qwen 3.5 2B')
+      expect(selectActiveChatInferenceSettings(state).enableThinking).toBe(true)
+      expect(selectActiveChatInferenceSettings(state).maxNewTokens).toBe(2000)
     })
 
     it('ignores invalid model ID', () => {
@@ -459,6 +516,9 @@ describe('showcase-reducer', () => {
       expect(state.loadProgress).toBe(100)
       expect(state.telemetry.loadDurationMs).toBe(5000)
       expect(state.telemetry.warmupDurationMs).toBe(500)
+      expect(state.telemetry.selectedModelLabel).toBe('Qwen 3.5 0.8B')
+      expect(state.telemetry.runtimePhase).toBe('ready')
+      expect(state.telemetry.warmState).toBe('warm')
     })
   })
 
@@ -750,6 +810,8 @@ describe('showcase-reducer', () => {
       expect(state.runtimePhase).toBe('idle')
       expect(state.warmState).toBe('cold')
       expect(state.tokenCount).toBe(0)
+      expect(state.telemetry.runtimePhase).toBe('idle')
+      expect(state.telemetry.warmState).toBe('cold')
     })
   })
 

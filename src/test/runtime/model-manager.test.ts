@@ -13,11 +13,14 @@ const testMessages: InferenceChatMessage[] = [
 
 const testSettings: GenerationDefaults = {
   doSample: true,
+  enableThinking: false,
   temperature: 0.7,
   topP: 0.8,
   topK: 20,
-  repetitionPenalty: 1.05,
-  maxNewTokens: 256,
+  minP: 0,
+  presencePenalty: 1.5,
+  repetitionPenalty: 1,
+  maxNewTokens: 2000,
 }
 
 let capturedOnEvent: ((event: WorkerEvent) => void) | null = null

@@ -1,15 +1,18 @@
-# LLM Showcase — Local WebGPU Chat
+# LLM Showcase — Local-First WebGPU Chat
 
-A browser-local multi-chat Qwen playground with WebGPU inference, persistent local history, and adjustable generation settings.
+A browser-native Qwen showcase with WebGPU inference, persistent local history, adjustable generation controls, and an editorial production-ready interface.
 
 ## Features
 
+- Editorial showcase layout with browser-native chat workspace
 - Multi-chat sidebar with create, select, rename, and delete capabilities
-- Chat-first workspace with streaming responses
+- Streaming responses with interrupt support
 - Persistent local history via IndexedDB
-- Editable system prompt
-- Adjustable inference settings (temperature, max tokens, top-p)
+- Editable system prompt and saved generation defaults
+- Adjustable inference settings (temperature, top-p, top-k, repetition penalty, max tokens)
+- Cursor-style context window gauge with approximate prompt-budget tracking
 - Browser-local WebGPU inference using Transformers.js & ONNX Runtime
+- Telemetry rail for runtime, capabilities, and memory heuristics
 
 ## Browser Support
 
@@ -25,6 +28,10 @@ All data stays local. Your chats never leave your browser:
 - Chat history stored in IndexedDB locally
 - Model weights downloaded once and cached
 - Full privacy—no data leaves your device
+
+## Showcase Entry Point
+
+- `/` — canonical production showcase homepage
 
 ## Development
 
@@ -49,6 +56,12 @@ npm run test:e2e    # E2E tests with Playwright (mock WebGPU runtime)
 - Actual VRAM cannot be queried reliably from browsers
 - Model weights downloaded on first load (may take time)
 - 4B model experimental—may fail on integrated GPUs
+
+## Production Notes
+
+- Legacy numbered prototype routes have been removed in favor of a single canonical homepage
+- Playwright E2E tests run against a mock runtime using `NEXT_PUBLIC_E2E_MOCK_RUNTIME=1`
+- Metadata is configured for a public showcase landing page
 
 ## Screenshots
 

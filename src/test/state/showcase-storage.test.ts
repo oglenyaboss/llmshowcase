@@ -85,6 +85,74 @@ describe('showcase-storage', () => {
       const result = await loadPersistedShowcaseState()
       expect(result).toBeNull()
     })
+
+    it('loads legacy persisted settings without dropping the payload', async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('llmshowcase', 1)
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => resolve(request.result)
+        request.onupgradeneeded = (event) => {
+          const db = (event.target as IDBOpenDBRequest).result
+          if (!db.objectStoreNames.contains('app-state')) {
+            db.createObjectStore('app-state')
+          }
+        }
+      })
+
+      const legacyPayload = {
+        version: 1,
+        activeChatId: 'legacy-chat',
+        newChatDefaults: {
+          modelId: 'qwen-0.8b',
+          systemPrompt: 'Legacy prompt',
+          inferenceSettings: {
+            doSample: true,
+            enableThinking: false,
+            temperature: 0.7,
+            topP: 0.8,
+            topK: 20,
+            repetitionPenalty: 1,
+            maxNewTokens: 256,
+          },
+        },
+        chats: [
+          {
+            id: 'legacy-chat',
+            title: 'Legacy chat',
+            isCustomTitle: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            modelId: 'qwen-0.8b',
+            systemPrompt: 'Legacy prompt',
+            inferenceSettings: {
+              doSample: true,
+              enableThinking: false,
+              temperature: 0.7,
+              topP: 0.8,
+              topK: 20,
+              repetitionPenalty: 1,
+              maxNewTokens: 256,
+            },
+            draftMessage: '',
+            messages: [],
+          },
+        ],
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction('app-state', 'readwrite')
+        const store = transaction.objectStore('app-state')
+        const request = store.put(legacyPayload, 'root')
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => resolve()
+      })
+
+      const result = await loadPersistedShowcaseState()
+
+      expect(result).not.toBeNull()
+      expect(result?.activeChatId).toBe('legacy-chat')
+      expect(result?.newChatDefaults.inferenceSettings.repetitionPenalty).toBe(1)
+    })
   })
 
   describe('savePersistedShowcaseState', () => {

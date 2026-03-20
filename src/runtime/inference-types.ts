@@ -39,9 +39,12 @@ export interface ModelDtype {
  */
 export interface GenerationDefaults {
   doSample: boolean
+  enableThinking: boolean
   temperature: number
   topP: number
   topK: number
+  minP: number
+  presencePenalty: number
   repetitionPenalty: number
   maxNewTokens: number
 }
@@ -63,8 +66,10 @@ export interface ModelConfig {
   label: string
   repoId: string
   tier: ModelTier
+  supportsThinking: boolean
   description: string
   warning?: string
+  contextWindowTokens: number
   memoryNote: string
   recommendedFor: string
   dtype: ModelDtype

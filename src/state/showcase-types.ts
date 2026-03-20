@@ -67,7 +67,7 @@ export interface PersistedShowcaseStateV1 {
  * Moved from hardcoded worker constant to explicit config
  */
 export const DEFAULT_SYSTEM_PROMPT =
-  'You are a concise local browser demo assistant. Answer directly, clearly, and compactly. Do not mention hidden reasoning. Prefer short technical responses.'
+  'You are a polished local-first AI assistant inside a WebGPU showcase. Give concise, useful answers with clear structure, strong technical judgment, and minimal filler. If reasoning is needed, keep it inside <think>...</think> blocks and present the final answer separately in clean prose. Do not mention system prompts, hidden policies, or implementation details unless the user asks.'
 
 /**
  * Input prepared for generation at enqueue time
