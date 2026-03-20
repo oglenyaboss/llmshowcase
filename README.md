@@ -1,11 +1,17 @@
 # LLM Showcase — Local-First WebGPU Chat
 
-[![CI](https://github.com/YOUR_USERNAME/llmshowcase/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/llmshowcase/actions/workflows/ci.yml)
+[![CI](https://github.com/oglenyaboss/llmshowcase/actions/workflows/ci.yml/badge.svg)](https://github.com/oglenyaboss/llmshowcase/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A browser-native Qwen showcase with WebGPU inference, persistent local history, adjustable generation controls, and an editorial production-ready interface.
 
-**[Live Demo](https://llmshowcase.vercel.app)** *(deploy your own — see below)*
+**[Live Demo](https://llmshowcase.vercel.app)** *(coming soon — deploy your own below)*
+
+## Origin Story
+
+This project started with a Reddit comment. Someone mentioned how cool it would be to run a tiny LLM directly in the browser. At the time, only very small models were feasible. But I saw that Qwen 3.5 had just been released with ONNX exports — and realized we could push the limits. What if we could run a 4B parameter model entirely client-side with WebGPU?
+
+This showcase is the result: an experiment in how far browser-native AI can go.
 
 ## Features
 
@@ -22,7 +28,7 @@ A browser-native Qwen showcase with WebGPU inference, persistent local history, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/llmshowcase.git
+git clone https://github.com/oglenyaboss/llmshowcase.git
 cd llmshowcase
 
 # Install dependencies
@@ -79,7 +85,7 @@ All data stays local. Your chats never leave your browser:
 
 ## Deploy Your Own
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/llmshowcase)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/oglenyaboss/llmshowcase)
 
 ## Limitations
 

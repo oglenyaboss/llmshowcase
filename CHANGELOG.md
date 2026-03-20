@@ -46,6 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generation settings panel
 - CI/CD pipeline with GitHub Actions
 
-[Unreleased]: https://github.com/YOUR_USERNAME/llmshowcase/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/YOUR_USERNAME/llmshowcase/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/YOUR_USERNAME/llmshowcase/releases/tag/v0.1.0
+[Unreleased]: https://github.com/oglenyaboss/llmshowcase/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/oglenyaboss/llmshowcase/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/oglenyaboss/llmshowcase/releases/tag/v0.1.0
