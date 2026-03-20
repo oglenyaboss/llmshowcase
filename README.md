@@ -13,6 +13,8 @@ This project started with a Reddit comment. Someone mentioned how cool it would 
 
 This showcase is the result: an experiment in how far browser-native AI can go.
 
+> ⚠️ **Honest disclaimer:** I have no idea if this will work on your machine. Honestly, I don't really care. But on my M1 Max everything flies. Your mileage may vary.
+
 ## Features
 
 - 🖥️ **Editorial showcase layout** with browser-native chat workspace
